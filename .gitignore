@@ -1,0 +1,18 @@
+# 배포 압축 파일
+*.zip
+
+# 실제 근무표와 개인 데이터 백업
+*.xlsx
+*.xls
+local-backups/
+
+# 환경 설정 및 로그
+.env
+.env.*
+!.env.example
+*.log
+
+# 개발 도구 및 운영체제 생성 파일
+node_modules/
+Thumbs.db
+.DS_Store
