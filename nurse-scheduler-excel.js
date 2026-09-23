@@ -9,7 +9,7 @@
   const PKG = 'http://schemas.openxmlformats.org/package/2006/relationships';
   const MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   const roles = ['HN', 'RN', 'MD', 'NK'];
-  const colors = {D:'EAF0FF', E:'FFF1DF', N:'F1E8FA', M:'E1F3EE', O:'F0F1F3', OFF:'F0F1F3', '휴가':'FBE4ED'};
+  const shiftCodes = ['D','E','N','M','O','OFF','휴가'];
   const children = (node, name) => Array.from(node.childNodes).filter(n => n.nodeType === 1 && (!name || n.localName === name));
   const first = (node, name) => children(node, name)[0];
   const all = (node, name) => Array.from(node.getElementsByTagNameNS(NS, name));
@@ -76,7 +76,7 @@
     for(const s of staff) {
       if(![...roles,'AN'].includes(s.category)) throw new Error('출력할 수 없는 직책입니다: '+s.category);
       if(!s.name || !Array.isArray(s.shifts) || s.shifts.length!==days) throw new Error('직원 또는 월별 근무 데이터가 올바르지 않습니다.');
-      if(s.shifts.some(v=>!Object.hasOwn(colors,v))) throw new Error(s.name+'의 근무 기호를 확인해주세요.');
+      if(s.shifts.some(v=>!shiftCodes.includes(v))) throw new Error(s.name+'의 근무 기호를 확인해주세요.');
     }
     const nurses=roles.flatMap(role=>staff.filter(s=>s.category===role)),assistants=staff.filter(s=>s.category==='AN');
     const extra = Number.isInteger(options.spareRows) ? Math.max(0,Math.min(3,options.spareRows)) : 1;
@@ -168,14 +168,36 @@
     const fillId=cell=>Number(children(xfs)[Number(cell?.getAttribute('s')||0)]?.getAttribute('fillId')||0);
     const weekdayCol=Array.from({length:31},(_,i)=>i+4).find(c=>value(8,c)&&!['토','일'].includes(value(8,c)))||4;
     const weekendCol=Array.from({length:31},(_,i)=>i+4).find(c=>['토','일'].includes(value(8,c)))||weekdayCol;
-    const ordinaryFill=fillId(originalCell(9,weekdayCol));
+    const fills=first(styleRoot,'fills');
+    function solidFill(rgb) {
+      const fill=el(styles,'fill'),pattern=el(styles,'patternFill',{patternType:'solid'});
+      pattern.appendChild(el(styles,'fgColor',{rgb:'FF'+rgb}));
+      pattern.appendChild(el(styles,'bgColor',{indexed:64}));fill.appendChild(pattern);
+      fills.appendChild(fill);fills.setAttribute('count',children(fills).length);
+      return children(fills).length-1;
+    }
+    const ordinaryFill=solidFill('FFFFFF'),wantedFill=solidFill('BDD7EE');
+    // Reuse the template's yellow holiday header fill in the roster body.
+    const holidayFill=fillId(originalCell(7,weekendCol));
+    const dateKeys=Array.from({length:days},(_,i)=>`${year}-${String(month).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`);
+    const holidays=options.holidays||{};
+    const isHoliday=j=>{
+      const weekday=new Date(Date.UTC(year,month-1,j+1)).getUTCDay();
+      return weekday===0||weekday===6||!!holidays[dateKeys[j]];
+    };
     for(let i=0;i<block.length;i++) {
       const person=block[i],r=start+i;
       if(person) {
         write(cellAt(r,1),i<nurseSlots?i+1:i-nurseSlots+1);write(cellAt(r,2),person.category);write(cellAt(r,3),person.name);
         person.shifts.forEach((sh,j)=>write(cellAt(r,j+4),sh==='O'?'OFF':sh));
       }
-      for(let c=4;c<=34;c++)styled(cellAt(r,c),{fillId:ordinaryFill});
+      for(let c=4;c<=34;c++) {
+        const j=c-4,shift=person?.shifts[j],wanted=person?.wanted?.[j]===true;
+        const explicitOff=wanted&&(shift==='O'||shift==='OFF');
+        const blue=shift==='휴가'||(wanted&&!explicitOff);
+        const fill=j>=days?ordinaryFill:blue?wantedFill:explicitOff?ordinaryFill:isHoliday(j)?holidayFill:ordinaryFill;
+        styled(cellAt(r,c),{fillId:fill});
+      }
       if(nurseSlots&&assistantSlots&&i===nurseSlots-1)for(let c=2;c<=widthEnd;c++)styled(cellAt(r,c),{borderBottom:'double'});
       const last=column(days+3),span=`D${r}:${last}${r}`;
       const totalFormula=(c,expression,count)=>{
@@ -187,8 +209,6 @@
       totalFormula(36,`COUNTIF(${span},"연")+COUNTIF(${span},"연차")`,0);
       totalFormula(37,`COUNTIF(${span},"OFF")+COUNTIF(${span},"O")`,person?.shifts.filter(v=>v==='O'||v==='OFF').length||0);
     }
-    const dateKeys=Array.from({length:days},(_,i)=>`${year}-${String(month).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`);
-    const holidays=options.holidays||{};
     for(let d=1;d<=31;d++) {
       const c=d+3,active=d<=days,weekday=new Date(Date.UTC(year,month-1,d)).getUTCDay();
       write(cellAt(7,c),active?d:null);write(cellAt(8,c),active?'일월화수목금토'[weekday]:null);
@@ -217,17 +237,8 @@
       }
       merges.setAttribute('count',children(merges).length);
     }
-    // Future hand edits change shift colors, without replacing the template's fonts/borders.
+    // Export-time provenance determines fills; shift-only rules would erase it.
     children(sheetRoot).filter(n=>['conditionalFormatting','dataValidations','rowBreaks','colBreaks','ignoredErrors','extLst'].includes(n.localName)).forEach(n=>sheetRoot.removeChild(n));
-    let dxfs=first(styleRoot,'dxfs');
-    if(!dxfs){dxfs=el(styles,'dxfs',{count:0});putOrdered(styleRoot,dxfs,['numFmts','fonts','fills','borders','cellStyleXfs','cellXfs','cellStyles','dxfs','tableStyles','colors','extLst']);}
-    const cf=el(sheet,'conditionalFormatting',{sqref:`D${start}:${column(days+3)}${end}`});
-    Object.entries(colors).forEach(([code,color],i)=>{
-      const dxf=el(styles,'dxf'),fill=el(styles,'fill'),pattern=el(styles,'patternFill',{patternType:'solid'});
-      pattern.appendChild(el(styles,'fgColor',{rgb:'FF'+color}));pattern.appendChild(el(styles,'bgColor',{indexed:64}));fill.appendChild(pattern);dxf.appendChild(fill);dxfs.appendChild(dxf);
-      const rule=el(sheet,'cfRule',{type:'cellIs',operator:'equal',dxfId:children(dxfs).length-1,priority:i+1}),f=el(sheet,'formula');f.textContent='"'+code+'"';rule.appendChild(f);cf.appendChild(rule);
-    });
-    dxfs.setAttribute('count',children(dxfs).length);putOrdered(sheetRoot,cf,sheetOrder);
     first(sheetRoot,'dimension')?.setAttribute('ref',`A1:${column(widthEnd)}${lastRow}`);
     const cols=first(sheetRoot,'cols');if(cols)for(const c of children(cols)) {if(Number(c.getAttribute('min'))>widthEnd)cols.removeChild(c);else if(Number(c.getAttribute('max'))>widthEnd)c.setAttribute('max',widthEnd);}
     all(sheet,'selection').forEach(n=>{n.setAttribute('activeCell','D9');n.setAttribute('sqref','D9');});

@@ -1,6 +1,6 @@
 # 간호사 스케줄러 — 직군별 편성 개정판
 
-2026-09-14. HTML, CSS, JavaScript를 같은 폴더에 두고 `nurse-scheduler.html`을 엽니다. 다운로드는 ZIP을 권장합니다. 엑셀 모듈은 기존 CDN을 사용하므로 엑셀 출력에는 인터넷 연결이 필요합니다.
+전체 배포 폴더에 HTML·CSS·JS, nurse_scheduler_template.xlsx, vendor 라이브러리가 포함되어 있습니다. GitHub Pages 또는 로컬 HTTP 서버에서 index.html로 접속하세요. 엑셀 출력은 로컬 라이브러리를 사용하며 외부 CDN이 필요하지 않습니다. 실행 방법은 [엑셀 출력 안내](EXCEL_TEMPLATE_SETUP.md)를 참고하세요.
 
 ## 사용 순서
 

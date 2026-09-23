@@ -2,18 +2,19 @@
 
 ## 적용
 
-압축 파일을 기존 프로젝트 폴더에 풀어 같은 이름의 파일을 교체합니다.
+ZIP에는 HTML·CSS·JS, 엑셀 템플릿, vendor 라이브러리와 검증 코드가 모두 포함되어 있습니다. 압축을 풀면 nurse-scheduler 폴더 자체가 전체 제품입니다. 이전 배포 파일을 따로 조합할 필요가 없습니다.
 
-- 교체: `index.html`, `nurse-scheduler.js`
-- 추가: `nurse-scheduler-excel.js`, `vendor/jszip.min.js`, `vendor/JSZip-LICENSE.md`
-- 안내: 이 문서와 README
-- 개발 검증용: `package.json`, `tests/template-export.test.cjs` (사이트 실행에는 npm 설치가 필요하지 않음)
+GitHub Pages 또는 로컬 HTTP 서버에서 index.html을 열고 **엑셀 출력**을 누르세요. HTML을 직접 더블클릭하는 file:// 방식은 템플릿을 읽을 수 없습니다. 사이트 실행에 npm 설치나 외부 CDN은 필요하지 않습니다.
 
-사용자가 준비한 **nurse_scheduler_template.xlsx**를 `index.html`과 같은 폴더에 둡니다. 파일명은 밑줄 두 개를 포함한 위 이름을 그대로 사용합니다. 이 배포 묶음은 사용자의 수정본을 덮어쓰지 않도록 템플릿을 포함하지 않습니다.
+Docker가 설치되어 있다면 압축을 푼 폴더에서 PowerShell로 다음을 실행합니다.
 
-GitHub Pages 또는 Docker의 `http://localhost:8080`에서 열고 **엑셀 출력**을 누르세요. `file://`로 HTML을 직접 열면 브라우저가 템플릿 읽기를 차단하므로 안내 메시지를 표시합니다. Excel 다운로드를 위해 별도 서버 기능이나 외부 CDN은 사용하지 않습니다.
+```powershell
+docker run --rm -d --name nurse-scheduler -p 8080:80 --mount "type=bind,source=$($PWD.Path),target=/usr/share/nginx/html,readonly" nginx:alpine
+```
 
-GitHub에 반영할 때는 두 JS 파일, index.html, vendor 폴더와 템플릿을 모두 함께 올려주세요. 템플릿에는 실명·과거 배정 등 실제 개인 기록이 없는 빈 양식을 사용합니다.
+http://localhost:8080 에 접속합니다. 기존 컨테이너가 같은 이름으로 실행 중이라면 기존 실행 환경을 그대로 사용하세요.
+
+템플릿은 GitHub에 올라간 nurse_scheduler_template.xlsx를 포함했습니다. 새 폴더를 배포할 때 폴더 안의 파일들을 모두 함께 사용하세요. 저장된 근무표는 브라우저의 동일한 주소에서 유지됩니다.
 
 ## 양식 기준
 
@@ -39,7 +40,10 @@ GitHub에 반영할 때는 두 JS 파일, index.html, vendor 폴더와 템플릿
 - 사이트의 최종 배정값을 사용합니다. 원티드·배정 데이터·스냅샷은 수정하지 않습니다.
 - 사이트의 `O`는 병원 표기인 `OFF`로 출력합니다. 미배정 날짜도 현재 사이트 규칙대로 OFF로 출력합니다.
 - 휴가는 `휴가`로 출력하며 연차 사용으로 단정하지 않습니다.
-- D/E/N/M/OFF/휴가 색상은 조건부 서식으로 적용해 다운로드 후 기호를 수정해도 바뀝니다.
+- 일반 근무와 일반 OFF는 흰색입니다. 주말·공휴일은 템플릿의 노란색을 적용합니다.
+- 직접 입력한 원티드 D/E/N/M과 휴가는 파란색이며 휴일 배경보다 우선합니다.
+- 직접 지정한 OFF는 주말·공휴일에도 흰색입니다. 날짜 머리글의 노란색은 유지합니다.
+- 배경색은 다운로드 시점의 원티드 정보를 기준으로 셀에 저장합니다. Excel에서 나중에 내용을 수정해도 배경이 자동으로 바뀌지는 않습니다.
 - 개인별 N 횟수와 OFF 일수는 수식으로 계산합니다. `연` 열은 수기 입력된 `연` 또는 `연차`만 계산합니다. `연1`처럼 번호가 붙은 표기와 반차·특수휴가는 아직 자동 집계하지 않습니다.
 - 원본 구분을 따라 하단 D/E/N은 상단 간호사만, M은 간호사와 AN을 합산합니다.
 - 여유 행에도 개인별 집계 수식이 있습니다. 이름을 넣으면 집계가 표시됩니다.

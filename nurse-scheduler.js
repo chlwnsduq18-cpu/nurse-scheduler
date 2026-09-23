@@ -446,6 +446,7 @@ exportExcel.onclick=async()=>{
   const options={year,month,spareRows:1,holidays:{...holidaysFor(year)},
     issues:Object.entries(analyzeMonth()),
     staff:state.staff.map(st=>({id:st.id,name:st.name,category:st.category||'RN',
+      wanted:dates.map(d=>Object.hasOwn(state.wanted||{},keyFor(d,st.id))),
       shifts:dates.map(d=>{const k=keyFor(d,st.id);return displayShift(k,state.assignments[k]?(state.assignments[k+'_type']||'D'):'O');})}))};
   const label=exportExcel.textContent;
   exportExcel.disabled=true;exportExcel.textContent='엑셀 작성 중…';

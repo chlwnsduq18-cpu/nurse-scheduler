@@ -33,7 +33,7 @@ test('template export: grouping, spare rows, totals, formula injection and prese
  const xf=Array.from(xfs).filter(n=>n.nodeType===1)[Number(cell(doc,'D13').getAttribute('s'))];
  const border=nodes(styles,'borders')[0].childNodes;const b=Array.from(border).filter(n=>n.nodeType===1)[Number(xf.getAttribute('borderId'))];
  assert.equal(nodes(b,'bottom')[0].getAttribute('style'),'double');
- assert.equal(nodes(doc,'cfRule').length,7);
+ assert.equal(nodes(doc,'cfRule').length,0);
  const srcZip=await JSZip.loadAsync(template),src=parse(await srcZip.file('xl/worksheets/sheet1.xml').async('string'));
  const ser=new XMLSerializer();
  const widths=d=>nodes(d,'col').filter(n=>Number(n.getAttribute('min'))<=44).map(n=>[Number(n.getAttribute('min')),Math.min(44,Number(n.getAttribute('max'))),n.getAttribute('width'),n.getAttribute('hidden')]);
@@ -91,10 +91,30 @@ test('export button captures month, loads relative template, restores button and
   document:{baseURI:'http://localhost:8080/nurse-scheduler/index.html',head:{appendChild(){}},body:{appendChild(){}},createElement(){return {click(){urls.push(this.download)},remove(){}}}},
   exportExcel:button,JSZip,NurseSchedulerExcel:{async build(bytes,options){exported.push(options);return {bytes:new Uint8Array([80,75]),mimeType:'test',filename:'test.xlsx'}}},
   cursor:new Date(2026,8,1),getMonthDates:()=>[new Date(2026,8,1)],holidaysFor:()=>({'2026-09-24':'추석'}),analyzeMonth:()=>({}),
-  state:{staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
+  state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
   alert:m=>alerts.push(m),async fetch(path){requests.push(String(path));fake.cursor=new Date(2026,9,1);return {ok:!fail,status:404,arrayBuffer:async()=>new Uint8Array([80,75]).buffer}}
  };fake.globalThis=fake;vm.runInNewContext(code,fake);await button.onclick();
- assert.equal(exported[0].month,9);assert.equal(exported[0].staff[0].shifts[0],'N');assert.equal(requests[0],'http://localhost:8080/nurse-scheduler/nurse_scheduler_template.xlsx');assert.equal(urls.length,1);assert.equal(button.disabled,false);
+ assert.equal(exported[0].staff[0].wanted[0],true);assert.equal(exported[0].month,9);assert.equal(exported[0].staff[0].shifts[0],'N');assert.equal(requests[0],'http://localhost:8080/nurse-scheduler/nurse_scheduler_template.xlsx');assert.equal(urls.length,1);assert.equal(button.disabled,false);
  fail=true;await button.onclick();assert.match(alerts[0],/nurse_scheduler_template.xlsx/);assert.equal(button.textContent,'엑셀 출력');assert.equal(button.disabled,false);
  fake.location.protocol='file:';await button.onclick();assert.match(alerts[1],/localhost/);
+});
+test('background colors follow wanted provenance, holiday and explicit OFF priority',async()=>{
+ const p=staff('RN','색상검증');
+ p.shifts.fill('O');p.wanted=Array(30).fill(false);
+ // Sept 2026: 1-4 weekdays, 5 Saturday, 6 Sunday, 24 holiday.
+ p.shifts[0]='D';p.shifts[1]='D';p.wanted[1]=true;
+ p.wanted[2]=true;p.shifts[3]='휴가';p.wanted[3]=true;
+ p.wanted[5]=true;p.shifts[23]='E';p.wanted[23]=true;
+ p.shifts[24]='휴가';p.wanted[24]=true;p.wanted[25]=true;
+ const {doc,styles}=await load({year:2026,month:9,staff:[p],holidays:{'2026-09-24':'추석','2026-09-25':'추석','2026-09-26':'추석','2026-09-28':'시험휴일'}});
+ const elements=n=>Array.from(n.childNodes).filter(n=>n.nodeType===1);
+ const fills=elements(nodes(styles,'fills')[0]),xfs=elements(nodes(styles,'cellXfs')[0]);
+ const fill=ref=>fills[Number(xfs[Number(cell(doc,ref).getAttribute('s'))].getAttribute('fillId'))];
+ const rgb=ref=>nodes(fill(ref),'fgColor')[0]?.getAttribute('rgb');
+ for(const ref of ['D9','F9','I9','AC9','AH9'])assert.equal(rgb(ref),'FFFFFFFF',ref+' must be white');
+ for(const ref of ['E9','G9','AA9','AB9'])assert.equal(rgb(ref),'FFBDD7EE',ref+' must be blue');
+ const serialize=n=>new XMLSerializer().serializeToString(n);
+ for(const ref of ['H9','AE9','H10'])assert.equal(serialize(fill(ref)),serialize(fill('H7')),ref+' must match template holiday yellow');
+ assert.equal(nodes(doc,'conditionalFormatting').length,0);
+ assert.equal(value(doc,'F9'),'OFF');assert.equal(value(doc,'G9'),'휴가');
 });
