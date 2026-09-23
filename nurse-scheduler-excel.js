@@ -78,7 +78,7 @@
       if(!s.name || !Array.isArray(s.shifts) || s.shifts.length!==days) throw new Error('직원 또는 월별 근무 데이터가 올바르지 않습니다.');
       if(s.shifts.some(v=>!shiftCodes.includes(v))) throw new Error(s.name+'의 근무 기호를 확인해주세요.');
     }
-    const nurses=roles.flatMap(role=>staff.filter(s=>s.category===role)),assistants=staff.filter(s=>s.category==='AN');
+    const nurses=staff.filter(s=>roles.includes(s.category)),assistants=staff.filter(s=>s.category==='AN');
     const extra = Number.isInteger(options.spareRows) ? Math.max(0,Math.min(3,options.spareRows)) : 1;
     // No empty nurse/AN section when that group has no members.
     let nurseSlots=nurses.length+(nurses.length?extra:0),assistantSlots=assistants.length+(assistants.length?extra:0);

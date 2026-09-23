@@ -30,7 +30,13 @@ if(!state.wanted){
     if(state.assignments[k]) state.wanted[k]=state.assignments[k+"_type"]||"D";
   });
 }
-state.schemaVersion=9;
+state.schemaVersion=10;
+state.monthStaff=state.monthStaff||{};
+// Freeze existing months before membership is edited; preserve historical rosters.
+for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted)]){
+  const month=k.slice(0,7);
+  if(/^\d{4}-\d{2}$/.test(month)&&!Object.hasOwn(state.monthStaff,month))state.monthStaff[month]=state.staff.map(st=>st.id);
+}
 if(state.rosterSettings?.weekend)state.rosterSettings.weekend.MD=false;
 state.leave=state.leave||{};
 state.holidayYears=state.holidayYears||{};
@@ -66,19 +72,78 @@ function removeRelated(predicate){
 const pad=n=>String(n).padStart(2,"0");
 const keyFor=(d,id)=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}:${id}`;
 
+
+function rosterMonth(){return `${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}`}
+function monthStaffIds(month=rosterMonth()){
+  const previous=Object.keys(state.monthStaff).filter(k=>k<month).sort().at(-1);
+  return state.monthStaff[month]??(previous?state.monthStaff[previous]:state.staff.map(st=>st.id));
+}
+function activeStaff(month=rosterMonth()){
+  const ids=new Set(monthStaffIds(month));return state.staff.filter(st=>ids.has(st.id));
+}
+function ensureMonthStaff(){
+  const month=rosterMonth();
+  if(!Object.hasOwn(state.monthStaff,month)){
+    state.monthStaff[month]=[...monthStaffIds(month)];save();
+  }
+}
+function saveMonthStaff(ids){
+  const previous=state.monthStaff;
+  const chosen=new Set(ids);
+  state.monthStaff={...previous,[rosterMonth()]:state.staff.filter(st=>chosen.has(st.id)).map(st=>st.id)};
+  if(!save()){state.monthStaff=previous;return false}return true;
+}
+function reorderStaff(id,targetId,after=false){
+  const previous=state.staff,source=previous.find(st=>st.id===id);
+  if(!source||id===targetId||!previous.some(st=>st.id===targetId))return false;
+  const next=previous.filter(st=>st.id!==id),index=next.findIndex(st=>st.id===targetId);
+  next.splice(index+(after?1:0),0,source);state.staff=next;
+  if(!save()){state.staff=previous;return false}return true;
+}
+function openMonthStaff(){
+  const dialog=document.getElementById('monthStaffDialog'),selected=new Set(monthStaffIds());
+  document.getElementById('monthStaffTitle').textContent=rosterMonth()+' 편성 인원';
+  document.getElementById('monthStaffChoices').innerHTML=state.staff.map(st=>`<label class="month-staff-choice"><input type="checkbox" value="${st.id}" ${selected.has(st.id)?'checked':''}><span>${esc(st.name)} · ${esc(st.category||'RN')}</span></label>`).join('')||'<p>등록된 직원이 없습니다.</p>';
+  dialog.showModal();
+}
+document.getElementById('monthStaffSettings').onclick=openMonthStaff;
+document.getElementById('cancelMonthStaff').onclick=()=>document.getElementById('monthStaffDialog').close();
+document.getElementById('saveMonthStaff').onclick=()=>{
+  const ids=Array.from(document.querySelectorAll('#monthStaffChoices input:checked'),el=>Number(el.value));
+  const removed=activeStaff().filter(st=>!ids.includes(st.id));
+  const hasData=removed.some(st=>Object.keys(state.assignments).some(k=>k.startsWith(rosterMonth()+'-')&&k.endsWith(':'+st.id))||Object.keys(state.wanted).some(k=>k.startsWith(rosterMonth()+'-')&&k.endsWith(':'+st.id)));
+  if(hasData&&!confirm('제외할 직원에게 이 달의 근무 또는 원티드가 있습니다. 데이터는 보관하고 표시·자동 생성·집계·엑셀에서 제외할까요? 다시 포함하면 기존 데이터를 볼 수 있습니다.'))return;
+  if(saveMonthStaff(ids)){document.getElementById('monthStaffDialog').close();render()}
+};
+
 function render(){
+  ensureMonthStaff();
+  document.getElementById("monthStaffSettings").textContent=`이번 달 편성 인원 (${activeStaff().length}/${state.staff.length})`;
   const issues=showValidation();
   const y=cursor.getFullYear(), m=cursor.getMonth();
   monthTitle.textContent=`${y}년 ${m+1}월`;
   staffList.innerHTML="";
   state.staff.forEach(s=>{
-    const el=document.createElement("div"); el.className="staff"; el.draggable=true; el.dataset.id=s.id;
-    el.innerHTML=`<div class="staff-info"><span class="dot"></span><div class="staff-main"><span class="staff-name">${esc(s.name)}</span><span class="staff-category" data-category="${esc(s.category||"RN")}">${esc(s.category||"RN")}</span></div></div><div><button class="del edit" title="정보 수정">정보</button><button class="del" title="삭제">×</button></div>`;
-    el.addEventListener("dragstart",e=>e.dataTransfer.setData("staffId",s.id));
+    const el=document.createElement("div"); el.className="staff"; el.draggable=activeStaff().some(st=>st.id===s.id); el.dataset.id=s.id;
+    el.innerHTML=`<button type="button" class="staff-order-handle" draggable="true" title="끌어서 순서 변경 · 위/아래 방향키로 이동" aria-label="${esc(s.name)} 순서 변경">↕</button><div class="staff-info"><span class="dot"></span><div class="staff-main"><span class="staff-name">${esc(s.name)}</span><span class="staff-category" data-category="${esc(s.category||"RN")}">${esc(s.category||"RN")}</span></div></div><div><button class="del edit" title="정보 수정">정보</button><button class="del" title="삭제">×</button></div>`;
+    el.classList.toggle('staff-excluded',!el.draggable);
+    el.addEventListener("dragstart",e=>{if(e.target.closest('.staff-order-handle'))return;e.dataTransfer.setData("staffId",s.id)});
+    const handle=el.querySelector('.staff-order-handle');
+    handle.ondragstart=e=>{e.stopPropagation();e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('application/x-staff-order',String(s.id))};
+    handle.onkeydown=e=>{
+      if(!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();
+      const index=state.staff.findIndex(st=>st.id===s.id),target=state.staff[index+(e.key==='ArrowUp'?-1:1)];
+      if(target&&reorderStaff(s.id,target.id,e.key==='ArrowDown')){render();staffList.querySelector(`[data-id="${s.id}"] .staff-order-handle`)?.focus()}
+    };
+    el.ondragover=e=>{if(Array.from(e.dataTransfer.types).includes('application/x-staff-order')){e.preventDefault();el.classList.add('reorder-over')}};
+    el.ondragleave=()=>el.classList.remove('reorder-over');
+    el.ondrop=e=>{const id=Number(e.dataTransfer.getData('application/x-staff-order'));if(!id)return;e.preventDefault();e.stopPropagation();el.classList.remove('reorder-over');if(reorderStaff(id,s.id,e.clientY>el.getBoundingClientRect().top+el.getBoundingClientRect().height/2))render()};
+    handle.ondragend=()=>staffList.querySelectorAll('.reorder-over').forEach(n=>n.classList.remove('reorder-over'));
     el.querySelector(".edit").onclick=()=>openStaffModal(s.id);
     el.querySelector(".del:not(.edit)").onclick=()=>{
       if(confirm(`${s.name} 간호사를 삭제할까요?`)){
         state.staff=state.staff.filter(x=>x.id!==s.id);
+        Object.keys(state.monthStaff).forEach(m=>state.monthStaff[m]=state.monthStaff[m].filter(id=>id!==s.id));
         removeRelated(k=>k.endsWith(":"+s.id));
         save();
         render();
@@ -134,7 +199,7 @@ function render(){
     const list=document.createElement("div");list.className="assignment-list";dz.appendChild(list);
     
     const summary={D:0,E:0,N:0,M:0};
-    state.staff.forEach(s=>{
+    activeStaff(dateKey.slice(0,7)).forEach(s=>{
       const k=keyFor(d,s.id);
       const sh=state.assignments[k+"_type"]||"D";
       if(state.assignments[k] && sh!=="O") summary[sh]++;
@@ -145,7 +210,7 @@ function render(){
     list.ondragleave=e=>{if(!list.contains(e.relatedTarget)){list.classList.remove("over");if(!dz.matches(":hover"))dz.classList.remove("over")}};
     list.ondrop=e=>{e.preventDefault();e.stopPropagation();list.classList.remove("over");dz.classList.remove("over");moveAssignmentToDate(e,dateKey)};
     
-    state.staff.forEach(s=>{
+    activeStaff(dateKey.slice(0,7)).forEach(s=>{
       const k=keyFor(d,s.id);
       if(state.assignments[k] && (state.assignments[k+"_type"]!=="O" || hasWanted(k))){
         const a=document.createElement("div");a.className="assignment";a.draggable=true;a.dataset.key=k;
@@ -180,7 +245,7 @@ function renderScheduleTable(){
   dates.forEach(d=>{
     const dk=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
     summaries[dk]={D:0,E:0,N:0,M:0};
-    state.staff.forEach(st=>{
+    activeStaff().forEach(st=>{
       const sh=getAssignmentShift(d,st.id);
       if(sh!=="O") summaries[dk][sh]=(summaries[dk][sh]||0)+1;
     });
@@ -195,7 +260,7 @@ function renderScheduleTable(){
   });
   html+='<th class="total-col">월 합계</th></tr></thead><tbody>';
 
-  state.staff.forEach(st=>{
+  activeStaff().forEach(st=>{
     const counts={D:0,E:0,N:0,M:0,O:0};
     html+=`<tr><th class="staff-col" title="${esc(st.name)}">${esc(st.name)}</th><td class="category-col">${esc(st.category||"RN")}</td>`;
     dates.forEach(d=>{
@@ -232,6 +297,7 @@ function moveAssignmentToDate(e,dateKey){
   const staffId=Number(e.dataTransfer.getData("staffId"));
   const fromKey=e.dataTransfer.getData("assignmentKey");
   if(staffId){
+    if(!activeStaff(dateKey.slice(0,7)).some(st=>st.id===staffId)){alert('이번 달 편성 인원에서 먼저 포함해주세요.');return}
     const newKey=`${dateKey}:${staffId}`;
     if(!state.assignments[newKey]){
       setWanted(newKey,"D");
@@ -242,6 +308,7 @@ function moveAssignmentToDate(e,dateKey){
   if(fromKey){
     const parts=fromKey.split(":");
     const id=Number(parts[1]);
+    if(!activeStaff(dateKey.slice(0,7)).some(st=>st.id===id)){alert('해당 월의 편성 인원에 포함되지 않은 직원입니다.');return}
     const newKey=`${dateKey}:${id}`;
     if(fromKey===newKey)return;
     if(state.assignments[newKey]){
@@ -264,7 +331,7 @@ function openAssignmentModal(dateKey, staffId=null){
   const d=new Date(datePart+"T00:00:00");
   assignmentDateDisplay.value=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
   assignmentStaffInput.innerHTML="";
-  state.staff.forEach(s=>{
+  activeStaff(datePart.slice(0,7)).forEach(s=>{
     const option=document.createElement("option");
     option.value=s.id;
     option.textContent=s.name;
@@ -273,7 +340,7 @@ function openAssignmentModal(dateKey, staffId=null){
 
   let selectedId=staffId ? Number(staffId) : null;
   if(!selectedId && parts[1]) selectedId=Number(parts[1]);
-  if(selectedId && state.staff.some(s=>s.id===selectedId)) assignmentStaffInput.value=selectedId;
+  if(selectedId && activeStaff(datePart.slice(0,7)).some(s=>s.id===selectedId)) assignmentStaffInput.value=selectedId;
 
   const currentKey=selectedId ? `${datePart}:${selectedId}` : "";
   assignmentShiftType=isVacation(currentKey)?"V":(currentKey && state.assignments[currentKey+"_type"]) || "D";
@@ -315,7 +382,7 @@ assignmentModal.addEventListener("click",e=>{if(e.target===assignmentModal)close
 saveAssignment.onclick=()=>{
   const dateKey=assignmentDateInput.value;
   const staffId=Number(assignmentStaffInput.value);
-  if(!dateKey || !staffId)return;
+  if(!dateKey || !staffId||!activeStaff(dateKey.slice(0,7)).some(st=>st.id===staffId))return;
   const key=`${dateKey}:${staffId}`;
   setWanted(key,assignmentShiftType);
   save();
@@ -431,7 +498,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20260923-colors2',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260923-roster1',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }
@@ -445,7 +512,7 @@ exportExcel.onclick=async()=>{
   const dates=getMonthDates(),year=cursor.getFullYear(),month=cursor.getMonth()+1;
   const options={year,month,spareRows:1,holidays:{...holidaysFor(year)},
     issues:Object.entries(analyzeMonth()),
-    staff:state.staff.map(st=>({id:st.id,name:st.name,category:st.category||'RN',
+    staff:activeStaff().map(st=>({id:st.id,name:st.name,category:st.category||'RN',
       wanted:dates.map(d=>Object.hasOwn(state.wanted||{},keyFor(d,st.id))),
       shifts:dates.map(d=>{const k=keyFor(d,st.id);return displayShift(k,state.assignments[k]?(state.assignments[k+'_type']||'D'):'O');})}))};
   const label=exportExcel.textContent;
@@ -532,7 +599,9 @@ saveStaff.onclick=()=>{
     const s=state.staff.find(x=>x.id===id);
     Object.assign(s,data);
   }else{
-    state.staff.push({id:Date.now(),...data});
+    const newId=Date.now();
+    state.staff.push({id:newId,...data});
+    state.monthStaff[rosterMonth()]=[...monthStaffIds(),newId];
   }
   save(); closeStaffModal(); render();
 };
@@ -602,7 +671,9 @@ function shiftTiming(sh){
 function currentPlan(){
   const p={};
   Object.keys(state.assignments).filter(k=>!k.endsWith('_type')).forEach(k=>{if(state.assignments[k])p[k]=state.assignments[k+'_type']||'D'});
-  Object.assign(p,state.wanted);return p;
+  Object.assign(p,state.wanted);
+  for(const k of Object.keys(p))if(!activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))delete p[k];
+  return p;
 }
 function weekStart(n){return n-((new Date(n*DAY_MS).getUTCDay()+6)%7)}
 // 2026 calendar: KASI 2026 almanac + 2026 Labor/Constitution Day amendments.
@@ -634,7 +705,7 @@ function midDemand(n,cfg=schedulerConfig()){
  return {key:'M',shift:'M',roles:['MD','RN'],min:holidayName(n)?0:Math.max(1,cfg.minimum.M),label:'M(평일 MD·RN 대체)'};
 }
 function allowedShifts(role){return role==='HN'?['D','O']:role==='MD'?['M','O']:role==='NK'?['N','O']:role==='RN'?['D','E','N','M','O']:['D','E','N','M','O']}
-function countShift(plan,n,sh,roles=null){return state.staff.filter(st=>(!roles||roles.includes(st.category||'RN'))&&plan[isoDay(n)+':'+st.id]===sh).length}
+function countShift(plan,n,sh,roles=null){return activeStaff(isoDay(n).slice(0,7)).filter(st=>(!roles||roles.includes(st.category||'RN'))&&plan[isoDay(n)+':'+st.id]===sh).length}
 function dayDemands(n,cfg=schedulerConfig()){
  const kind=dayKind(n),c=rosterSettings().coverage[kind];
  const night=Math.max(c.N,cfg.minimum.N);
@@ -713,7 +784,7 @@ function canPlace(plan,n,st,sh,cfg){
 }
 function workTargetGaps(plan,cfg=schedulerConfig()){
  const dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),inMonth=new Set(dates),gaps=[];
- for(const monday of [...new Set(dates.map(weekStart))])for(const st of state.staff){
+ for(const monday of [...new Set(dates.map(weekStart))])for(const st of activeStaff()){
    if(st.category==='NK')continue; // NK has a monthly half-roster target, not five days every week.
    let actual=0,eligible=0,outside=0;
    for(let d=monday;d<monday+7;d++){
@@ -727,7 +798,7 @@ function workTargetGaps(plan,cfg=schedulerConfig()){
  return gaps;
 }
 function nkBalance(plan){
- const dates=getMonthDates(),nk=state.staff.filter(s=>s.category==='NK');
+ const dates=getMonthDates(),nk=activeStaff().filter(s=>s.category==='NK');
  const counts=nk.map(s=>dates.filter(d=>plan[keyFor(d,s.id)]==='N').length);
  return {nk,counts,penalty:nk.length===2?counts.reduce((sum,c)=>sum+Math.max(0,Math.floor(dates.length/2)-c,c-Math.ceil(dates.length/2)),0):0};
 }
@@ -741,7 +812,7 @@ function analyzeMonth(plan=currentPlan()){
      if(d.shift==='N'&&count>d.min)add(n,`${d.label} 정원 ${d.min}명 초과`);
    }
    for(const sh of ['D','E','N','M'])for(const pool of [['HN','RN','NK','MD'],['AN']])if(countShift(plan,n,sh,pool)>cfg.maximum[sh])add(n,`${pool[0]==='AN'?'AN':'간호사'} ${sh} 최대 인원 초과`);
-   for(const st of state.staff){
+   for(const st of activeStaff()){
      const k=isoDay(n)+':'+st.id,sh=plan[k],role=st.category||'RN';
      for(const e of staffProblems(plan,n,st,sh,cfg))add(n,`${st.name}: ${e}${hasWanted(k)?' (사용자 지정 유지)':''}`);
      if(sh==='O'&&role==='NK'){
@@ -830,13 +901,13 @@ function solveMonth(){
  const cfg=schedulerConfig(),dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),start=dates[0],end=dates.at(-1),month=isoDay(start).slice(0,7);
  const current=currentPlan(),baseline={},fixed={};
  for(const [k,v]of Object.entries(current))if(!k.startsWith(month+'-'))fixed[k]=v;
- Object.assign(fixed,state.wanted);
- for(const n of dates)for(const st of state.staff){const k=isoDay(n)+':'+st.id;baseline[k]=state.generationSnapshot?.month===month?state.generationSnapshot.shifts[k]??current[k]:current[k]}
- const nk=state.staff.filter(s=>s.category==='NK');let best=null;
+ for(const [k,v]of Object.entries(state.wanted))if(activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))fixed[k]=v;
+ for(const n of dates)for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;baseline[k]=state.generationSnapshot?.month===month?state.generationSnapshot.shifts[k]??current[k]:current[k]}
+ const nk=activeStaff().filter(s=>s.category==='NK');let best=null;
  for(let attempt=0;attempt<36;attempt++){
    let plan={...fixed},seed=731+attempt*7919;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
    // Keep previous valid night blocks first on one third of attempts.
-   if(attempt%3===0)for(const st of state.staff)for(const n of dates){
+   if(attempt%3===0)for(const st of activeStaff())for(const n of dates){
      if(baseline[isoDay(n)+':'+st.id]!=='N'||baseline[isoDay(n-1)+':'+st.id]==='N')continue;
      let len=1;while(n+len<=end&&baseline[isoDay(n+len)+':'+st.id]==='N')len++;
      if(len>=2&&len<=3||st.category==='AN'&&len===1){const trial=addNightBlock(plan,st,n,len,cfg,start,end);if(trial)plan=trial}
@@ -848,7 +919,7 @@ function solveMonth(){
    for(const n of dates)for(const demand of dayDemands(n,cfg).filter(d=>d.shift==='N')){
      while(countShift(plan,n,'N',demand.roles)<demand.min){
        const options=[];
-       for(const st of state.staff.filter(s=>demand.roles.includes(s.category||'RN'))){
+       for(const st of activeStaff().filter(s=>demand.roles.includes(s.category||'RN'))){
          for(const len of (st.category==='AN'?[1,2,3]:[2,3]))for(let offset=0;offset<len;offset++){
            const a=n-offset,trial=addNightBlock(plan,st,a,len,cfg,start,end);if(!trial)continue;
            let gain=0,changes=0,total=0;
@@ -870,11 +941,11 @@ function solveMonth(){
      }
    }
    // HN and MD planned work, then preserve feasible existing day/evening shifts.
-   for(const st of state.staff.filter(s=>['HN','MD'].includes(s.category)))for(const n of dates){const sh=st.category==='HN'?'D':'M';if(canPlace(plan,n,st,sh,cfg))plan[isoDay(n)+':'+st.id]=sh}
-   if(attempt%3===0)for(const n of dates)for(const st of state.staff){const k=isoDay(n)+':'+st.id,sh=baseline[k];if(work(sh)&&sh!=='N'&&canPlace(plan,n,st,sh,cfg))plan[k]=sh}
+   for(const st of activeStaff().filter(s=>['HN','MD'].includes(s.category)))for(const n of dates){const sh=st.category==='HN'?'D':'M';if(canPlace(plan,n,st,sh,cfg))plan[isoDay(n)+':'+st.id]=sh}
+   if(attempt%3===0)for(const n of dates)for(const st of activeStaff()){const k=isoDay(n)+':'+st.id,sh=baseline[k];if(work(sh)&&sh!=='N'&&canPlace(plan,n,st,sh,cfg))plan[k]=sh}
    for(const n of dates)for(const d of dayDemands(n,cfg).filter(d=>d.shift!=='N').sort((a,b)=>Number(b.shift==='M')-Number(a.shift==='M'))){
      while(countShift(plan,n,d.shift,d.roles)<d.min){
-       const options=state.staff.filter(st=>d.roles.includes(st.category||'RN')&&canPlace(plan,n,st,d.shift,cfg)).map(st=>{
+       const options=activeStaff().filter(st=>d.roles.includes(st.category||'RN')&&canPlace(plan,n,st,d.shift,cfg)).map(st=>{
          const k=isoDay(n)+':'+st.id,prev=plan[isoDay(n-1)+':'+st.id];
          return {st,score:(baseline[k]===d.shift?-20:0)+(prev===d.shift?-4:0)+weeklyWorked(plan,n,st.id)*2+random()*8};
        }).sort((a,b)=>a.score-b.score);
@@ -882,7 +953,7 @@ function solveMonth(){
      }
    }
    // Minimize unnecessary OFF without introducing surplus N or substituting AN for nurses.
-   for(const st of state.staff.filter(s=>s.category!=='NK'))for(let loop=0;loop<dates.length;loop++){
+   for(const st of activeStaff().filter(s=>s.category!=='NK'))for(let loop=0;loop<dates.length;loop++){
      const options=[];for(const n of dates)for(const sh of allowedShifts(st.category||'RN').filter(s=>work(s)&&s!=='N')){
        if(!canPlace(plan,n,st,sh,cfg))continue;const k=isoDay(n)+':'+st.id;
        options.push({k,sh,score:(baseline[k]===sh?-20:0)+(plan[isoDay(n-1)+':'+st.id]===sh?-4:0)+countShift(plan,n,sh,[st.category])*2+random()*6});
@@ -891,7 +962,7 @@ function solveMonth(){
    }
    repairDayTargets(plan,cfg,dates);
    let missing=0,changes=0;
-   for(const n of dates){for(const d of dayDemands(n,cfg))missing+=Math.max(0,d.min-countShift(plan,n,d.shift,d.roles));for(const st of state.staff){const k=isoDay(n)+':'+st.id;plan[k]??='O';if(baseline[k]!==undefined&&baseline[k]!==plan[k])changes++}}
+   for(const n of dates){for(const d of dayDemands(n,cfg))missing+=Math.max(0,d.min-countShift(plan,n,d.shift,d.roles));for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;plan[k]??='O';if(baseline[k]!==undefined&&baseline[k]!==plan[k])changes++}}
    const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[missing,balance,unfilled,changes];
    const better=!best||score.some((v,i)=>v<best.score[i]&&score.slice(0,i).every((x,j)=>x===best.score[j]));
    if(better)best={plan,missing,changes,unfilled,month,score};
@@ -928,8 +999,9 @@ function generateMonth(){
   if(!(state.holidayYears[year]?state.holidayYears[year].confirmed:year===2026)){
     alert('편성 규칙에서 '+year+'년 공휴일 목록을 입력하고 확인해주세요.');return false;
   }
-  const result=solveMonth(),next=JSON.parse(JSON.stringify(state)),shifts={};
-  for(const date of getMonthDates())for(const st of state.staff){const k=keyFor(date,st.id);shifts[k]=result.plan[k];next.assignments[k]=1;next.assignments[k+'_type']=shifts[k]}
+  if(!activeStaff().length){alert('이번 달 편성 인원을 선택해주세요.');return false}
+  const result=solveMonth(),next=JSON.parse(JSON.stringify(state)),shifts=state.generationSnapshot?.month===rosterMonth()?{...state.generationSnapshot.shifts}:{};
+  for(const date of getMonthDates())for(const st of activeStaff()){const k=keyFor(date,st.id);shifts[k]=result.plan[k];next.assignments[k]=1;next.assignments[k+'_type']=shifts[k]}
   next.generationSnapshot={month:result.month,savedAt:new Date().toISOString(),shifts};
   try{localStorage.setItem(KEY,JSON.stringify(next))}catch(error){alert('저장 공간 또는 권한 문제로 생성 결과를 저장하지 못했습니다. 기존 근무표와 스냅샷을 유지합니다.');return false}
   state=next;render();
@@ -938,7 +1010,7 @@ function generateMonth(){
   return true;
 }
 autoGenerate.onclick=()=>{
-  if(!state.staff.length){alert('먼저 간호사를 등록해주세요.');return}
+  if(!activeStaff().length){alert('이번 달 편성 인원을 선택해주세요.');return}
   if(!confirm('사용자 지정·휴가를 보호하고 직군별/요일별 인원과 N 묶음 규칙으로 생성할까요?\nNK는 월 절반씩 교대, RN은 N 2~3일 뒤 OFF 2일을 적용합니다. AN은 별도 인원입니다. 충족하지 못한 날짜는 붉은색으로 표시합니다.'+(state.shiftTimesConfirmed?'':'\n주의: 시간 설정이 아직 예시입니다. 실제 운영 전에 편성 규칙에서 확인해주세요.')))return;
   autoGenerate.disabled=true;autoGenerate.textContent='편성 중…';
   setTimeout(()=>{try{generateMonth()}finally{autoGenerate.disabled=false;autoGenerate.textContent='자동 생성'}},30);

@@ -23,8 +23,8 @@ test('template export: grouping, spare rows, totals, formula injection and prese
  const {result,zip,doc,styles}=await load({year:2026,month:9,staff:input,holidays:{'2026-09-24':'추석'},issues:[['2026-09-01',['확인 <필요>']]]});
  assert.equal(JSON.stringify(input),snapshot);assert.deepEqual(template,before);
  assert.equal(result.layout.nurseSlots,5);assert.equal(result.layout.assistantSlots,2);
- assert.deepEqual([9,10,11,12,13,14,15].map(r=>value(doc,'B'+r)),['HN','RN','MD','NK','','AN','']);
- assert.equal(value(doc,'C10'),'=1+1');assert.equal(nodes(cell(doc,'C10'),'f').length,0);
+ assert.deepEqual([9,10,11,12,13,14,15].map(r=>value(doc,'B'+r)),['RN','NK','HN','MD','','AN','']);
+ assert.equal(value(doc,'C9'),'=1+1');assert.equal(nodes(cell(doc,'C9'),'f').length,0);
  assert.equal(value(doc,'AH7'),'');assert.equal(value(doc,'AG7'),'30');assert.equal(value(doc,'H9'),'OFF');assert.equal(value(doc,'I9'),'휴가');
  assert.equal(value(doc,'AI9'),'5');assert.equal(value(doc,'AJ9'),'0');assert.equal(value(doc,'AK9'),'5');
  assert.equal(formula(doc,'D17'),'COUNTIF(D9:D13,"D")');assert.equal(value(doc,'D17'),'4');assert.equal(value(doc,'G20'),'5');
@@ -91,7 +91,7 @@ test('export button captures month, loads relative template, restores button and
   document:{baseURI:'http://localhost:8080/nurse-scheduler/index.html',head:{appendChild(){}},body:{appendChild(){}},createElement(){return {click(){urls.push(this.download)},remove(){}}}},
   exportExcel:button,JSZip,NurseSchedulerExcel:{async build(bytes,options){exported.push(options);return {bytes:new Uint8Array([80,75]),mimeType:'test',filename:'test.xlsx'}}},
   cursor:new Date(2026,8,1),getMonthDates:()=>[new Date(2026,8,1)],holidaysFor:()=>({'2026-09-24':'추석'}),analyzeMonth:()=>({}),
-  state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
+  activeStaff:()=>fake.state.staff,state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
   alert:m=>alerts.push(m),async fetch(path){requests.push(String(path));fake.cursor=new Date(2026,9,1);return {ok:!fail,status:404,arrayBuffer:async()=>new Uint8Array([80,75]).buffer}}
  };fake.globalThis=fake;vm.runInNewContext(code,fake);await button.onclick();
  assert.equal(exported[0].staff[0].wanted[0],true);assert.equal(exported[0].month,9);assert.equal(exported[0].staff[0].shifts[0],'N');assert.equal(requests[0],'http://localhost:8080/nurse-scheduler/nurse_scheduler_template.xlsx');assert.equal(urls.length,1);assert.equal(button.disabled,false);

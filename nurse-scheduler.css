@@ -624,3 +624,15 @@ button,input,select{font-size:inherit}
 .vacation-legend{padding:2px 5px;border-radius:4px}.weekend-settings{display:flex;flex-wrap:wrap;gap:12px;margin:12px 0}.weekend-settings label{font-size:13px}
 .coverage-editor{width:100%;border-collapse:collapse;font-size:12px}.coverage-editor th,.coverage-editor td{padding:5px;border:1px solid #e2e5ea}.coverage-editor input{width:100%;min-width:40px;box-sizing:border-box}
 #holidayDates{width:100%;box-sizing:border-box;font:13px/1.6 monospace}.public-holiday .num,.schedule-table .public-holiday .date-num{color:#b64b4b}
+
+/* Staff order and monthly membership */
+.staff-order-handle{cursor:grab;flex:0 0 32px;padding:6px 2px;font-size:22px;background:transparent;border:1px solid #c5ccd5;border-radius:6px;color:#26384c}
+.staff-order-handle:active{cursor:grabbing}
+.staff-excluded .staff-info{opacity:.45}
+.staff.reorder-over{outline:3px solid #0050a4;outline-offset:-3px}
+#monthStaffDialog{width:min(560px,90vw);max-height:85vh;overflow:auto;border:1px solid #b9c4d1;border-radius:16px;padding:24px;color:#20252c}
+#monthStaffDialog::backdrop{background:#0008}
+#monthStaffDialog p{line-height:1.6;color:#485363}
+.month-staff-choice{display:flex;align-items:center;gap:14px;padding:12px;border-bottom:1px solid #e1e5ea;font-size:18px}
+.month-staff-choice input{width:22px;height:22px;flex-shrink:0}
+.month-staff-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
