@@ -3,6 +3,7 @@
 
 # 실제 근무표와 개인 데이터 백업
 *.xlsx
+!nurse_scheduler_template.xlsx
 *.xls
 local-backups/
 
