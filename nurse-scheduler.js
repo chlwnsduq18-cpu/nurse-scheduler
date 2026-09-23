@@ -431,7 +431,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260923-colors2',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }

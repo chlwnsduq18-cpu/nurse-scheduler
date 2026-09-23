@@ -112,9 +112,12 @@ test('background colors follow wanted provenance, holiday and explicit OFF prior
  const fill=ref=>fills[Number(xfs[Number(cell(doc,ref).getAttribute('s'))].getAttribute('fillId'))];
  const rgb=ref=>nodes(fill(ref),'fgColor')[0]?.getAttribute('rgb');
  for(const ref of ['D9','F9','I9','AC9','AH9'])assert.equal(rgb(ref),'FFFFFFFF',ref+' must be white');
- for(const ref of ['E9','G9','AA9','AB9'])assert.equal(rgb(ref),'FFBDD7EE',ref+' must be blue');
+ for(const ref of ['E9','G9','AA9','AB9'])assert.equal(rgb(ref),'FF0050A4',ref+' must be blue');
  const serialize=n=>new XMLSerializer().serializeToString(n);
  for(const ref of ['H9','AE9','H10'])assert.equal(serialize(fill(ref)),serialize(fill('H7')),ref+' must match template holiday yellow');
+ const fonts=elements(nodes(styles,'fonts')[0]);
+ const fontRgb=ref=>nodes(fonts[Number(xfs[Number(cell(doc,ref).getAttribute('s'))].getAttribute('fontId'))],'color')[0]?.getAttribute('rgb');
+ assert.equal(fontRgb('E9'),'FFFFFFFF');assert.equal(fontRgb('D9'),'FF000000');
  assert.equal(nodes(doc,'conditionalFormatting').length,0);
  assert.equal(value(doc,'F9'),'OFF');assert.equal(value(doc,'G9'),'휴가');
 });

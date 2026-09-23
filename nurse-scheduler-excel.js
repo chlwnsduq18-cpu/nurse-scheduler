@@ -161,6 +161,14 @@
         borders.appendChild(border);borders.setAttribute('count',children(borders).length);
         xf.setAttribute('borderId',children(borders).length-1);xf.setAttribute('applyBorder','1');
       }
+      if(changes.fontColor) {
+        const fonts=first(styleRoot,'fonts');
+        const font=children(fonts)[Number(xf.getAttribute('fontId')||0)].cloneNode(true);
+        children(font,'color').forEach(n=>font.removeChild(n));
+        font.appendChild(el(styles,'color',{rgb:'FF'+changes.fontColor}));
+        fonts.appendChild(font);fonts.setAttribute('count',children(fonts).length);
+        xf.setAttribute('fontId',children(fonts).length-1);xf.setAttribute('applyFont','1');
+      }
       if(changes.fillId!=null) {xf.setAttribute('fillId',changes.fillId);xf.setAttribute('applyFill','1');}
       xfs.appendChild(xf);xfs.setAttribute('count',children(xfs).length);
       const n=children(xfs).length-1;styleCache.set(key,n);cell.setAttribute('s',n);
@@ -176,7 +184,7 @@
       fills.appendChild(fill);fills.setAttribute('count',children(fills).length);
       return children(fills).length-1;
     }
-    const ordinaryFill=solidFill('FFFFFF'),wantedFill=solidFill('BDD7EE');
+    const ordinaryFill=solidFill('FFFFFF'),wantedFill=solidFill('0050A4');
     // Reuse the template's yellow holiday header fill in the roster body.
     const holidayFill=fillId(originalCell(7,weekendCol));
     const dateKeys=Array.from({length:days},(_,i)=>`${year}-${String(month).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`);
@@ -196,7 +204,7 @@
         const explicitOff=wanted&&(shift==='O'||shift==='OFF');
         const blue=shift==='휴가'||(wanted&&!explicitOff);
         const fill=j>=days?ordinaryFill:blue?wantedFill:explicitOff?ordinaryFill:isHoliday(j)?holidayFill:ordinaryFill;
-        styled(cellAt(r,c),{fillId:fill});
+        styled(cellAt(r,c),{fillId:fill,fontColor:blue&&j<days?'FFFFFF':'000000'});
       }
       if(nurseSlots&&assistantSlots&&i===nurseSlots-1)for(let c=2;c<=widthEnd;c++)styled(cellAt(r,c),{borderBottom:'double'});
       const last=column(days+3),span=`D${r}:${last}${r}`;
