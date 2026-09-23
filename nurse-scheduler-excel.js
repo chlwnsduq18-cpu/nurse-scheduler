@@ -202,7 +202,7 @@
       for(let c=4;c<=34;c++) {
         const j=c-4,shift=person?.shifts[j],wanted=person?.wanted?.[j]===true;
         const explicitOff=wanted&&(shift==='O'||shift==='OFF');
-        const blue=shift==='휴가'||(wanted&&!explicitOff);
+        const blue=wanted&&!explicitOff;
         const fill=j>=days?ordinaryFill:blue?wantedFill:explicitOff?ordinaryFill:isHoliday(j)?holidayFill:ordinaryFill;
         styled(cellAt(r,c),{fillId:fill,fontColor:blue&&j<days?'FFFFFF':'000000'});
       }

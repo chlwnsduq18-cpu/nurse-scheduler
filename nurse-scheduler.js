@@ -30,7 +30,13 @@ if(!state.wanted){
     if(state.assignments[k]) state.wanted[k]=state.assignments[k+"_type"]||"D";
   });
 }
-state.schemaVersion=10;
+state.manual=state.manual||{};
+// Apply the newly agreed default coverage once, keeping other custom settings.
+if((state.schemaVersion||0)<11&&state.rosterSettings?.coverage){
+  Object.assign(state.rosterSettings.coverage.saturday,{D:2,E:1,N:1,AN:1});
+  Object.assign(state.rosterSettings.coverage.holiday,{D:1,E:1,N:1,AN:1});
+}
+state.schemaVersion=11;
 state.monthStaff=state.monthStaff||{};
 // Freeze existing months before membership is edited; preserve historical rosters.
 for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted)]){
@@ -51,16 +57,32 @@ save();
 const hasWanted=k=>Object.prototype.hasOwnProperty.call(state.wanted,k);
 function putAssignment(k,shift){state.assignments[k]=1;state.assignments[k+"_type"]=shift}
 function setWanted(k,shift){
+  if(state.manual)delete state.manual[k];
   delete state.leave[k];
   if(shift==='V'){state.leave[k]='vacation';shift='O'}
   state.wanted[k]=shift;putAssignment(k,shift);
 }
+function hasManual(k){return Object.hasOwn(state.manual||{},k)}
+function hasFixed(k){return hasWanted(k)||hasManual(k)}
+function fixedShift(k){return state.wanted[k]??state.manual?.[k]}
+function setManual(k,shift){
+  state.manual=state.manual||{};delete state.wanted[k];delete state.leave[k];
+  if(shift==='V'){state.leave[k]='vacation';shift='O'}
+  state.manual[k]=shift;putAssignment(k,shift);
+}
+function saveUserShift(k,shift,wanted){
+  const previous=JSON.parse(JSON.stringify(state));
+  if(wanted)setWanted(k,shift);else setManual(k,shift);
+  if(!save()){state=previous;return false}return true;
+}
 function releaseWanted(k){
+  if(state.manual)delete state.manual[k];
   delete state.leave[k];
   delete state.wanted[k];
   delete state.assignments[k];delete state.assignments[k+"_type"];
 }
 function removeRelated(predicate){
+  Object.keys(state.manual||{}).forEach(k=>{if(predicate(k))delete state.manual[k]});
   Object.keys(state.assignments).forEach(k=>{if(predicate(k.endsWith("_type")?k.slice(0,-5):k))delete state.assignments[k]});
   Object.keys(state.wanted).forEach(k=>{if(predicate(k))delete state.wanted[k]});
   Object.keys(state.leave).forEach(k=>{if(predicate(k))delete state.leave[k]});
@@ -215,14 +237,14 @@ function render(){
     
     activeStaff(dateKey.slice(0,7)).forEach(s=>{
       const k=keyFor(d,s.id);
-      if(state.assignments[k] && (state.assignments[k+"_type"]!=="O" || hasWanted(k))){
+      if(state.assignments[k] && (state.assignments[k+"_type"]!=="O" || hasFixed(k))){
         const a=document.createElement("div");a.className="assignment";a.draggable=true;a.dataset.key=k;
         const shiftType=state.assignments[k+"_type"]||"D";
         const displayName=shortName(s.name);
         a.innerHTML=`<span class="assignment-name" title="${esc(s.name)}">${esc(displayName)}</span><button class="shift-badge shift-${isVacation(k)?'V':esc(shiftType)}" title="근무 형태 변경 · ${esc(s.name)}" aria-label="${esc(s.name)} 근무 형태 변경">${displayShift(k,shiftType)}${hasWanted(k)?" 🔒":""}</button><button class="remove-shift" title="지정 OFF로 변경" aria-label="${esc(s.name)} 지정 OFF로 변경">O</button>`;
         const shiftBtn=a.querySelector(".shift-badge");
         shiftBtn.onclick=e=>{e.stopPropagation();openShiftModal(k)};
-        a.querySelector(".remove-shift").onclick=e=>{e.stopPropagation();setWanted(k,"O");save();render()};
+        a.querySelector(".remove-shift").onclick=e=>{e.stopPropagation();if(saveUserShift(k,"O",hasWanted(k)))render()};
         a.onclick=e=>{if(e.target.closest("button"))return;openShiftModal(k)};
         a.addEventListener("dragstart",e=>{e.stopPropagation();e.dataTransfer.effectAllowed="move";e.dataTransfer.setData("assignmentKey",k);a.classList.add("dragging")});
         a.addEventListener("dragend",()=>{a.classList.remove("dragging");document.querySelectorAll(".assignment-list.over").forEach(x=>x.classList.remove("over"));document.querySelectorAll(".dropzone.over").forEach(x=>x.classList.remove("over"))});
@@ -303,8 +325,7 @@ function moveAssignmentToDate(e,dateKey){
     if(!activeStaff(dateKey.slice(0,7)).some(st=>st.id===staffId)){alert('이번 달 편성 인원에서 먼저 포함해주세요.');return}
     const newKey=`${dateKey}:${staffId}`;
     if(!state.assignments[newKey]){
-      setWanted(newKey,"D");
-      save(); render();
+      openAssignmentModal(dateKey,staffId);
     }
     return;
   }
@@ -319,9 +340,10 @@ function moveAssignmentToDate(e,dateKey){
       return;
     }
     const oldType=isVacation(fromKey)?"V":state.assignments[fromKey+"_type"]||"D";
-    setWanted(fromKey,"O");
-    setWanted(newKey,oldType);
-    save();render();
+    const previous=JSON.parse(JSON.stringify(state)),wanted=hasWanted(fromKey);
+    setManual(fromKey,"O");
+    if(wanted)setWanted(newKey,oldType);else setManual(newKey,oldType);
+    if(!save()){state=previous;return}render();
   }
 }
 
@@ -345,7 +367,8 @@ function openAssignmentModal(dateKey, staffId=null){
   if(!selectedId && parts[1]) selectedId=Number(parts[1]);
   if(selectedId && activeStaff(datePart.slice(0,7)).some(s=>s.id===selectedId)) assignmentStaffInput.value=selectedId;
 
-  const currentKey=selectedId ? `${datePart}:${selectedId}` : "";
+  const currentKey=`${datePart}:${Number(assignmentStaffInput.value)}`;
+  document.getElementById("assignmentWanted").checked=hasWanted(currentKey)||(!hasManual(currentKey)&&!state.assignments[currentKey]);
   assignmentShiftType=isVacation(currentKey)?"V":(currentKey && state.assignments[currentKey+"_type"]) || "D";
   document.querySelectorAll("#assignmentShiftOptions .shift-option").forEach(b=>{
     b.classList.toggle("active",b.dataset.shift===assignmentShiftType);
@@ -364,6 +387,7 @@ function syncAssignmentShiftForSelectedStaff(){
   const dateKey=assignmentDateInput.value;
   const staffId=Number(assignmentStaffInput.value);
   const currentKey=dateKey && staffId ? `${dateKey}:${staffId}` : "";
+  document.getElementById("assignmentWanted").checked=hasWanted(currentKey)||(!hasManual(currentKey)&&!state.assignments[currentKey]);
   assignmentShiftType=isVacation(currentKey)?"V":(currentKey && state.assignments[currentKey+"_type"]) || "D";
   document.querySelectorAll("#assignmentShiftOptions .shift-option").forEach(b=>{
     b.classList.toggle("active",b.dataset.shift===assignmentShiftType);
@@ -373,7 +397,7 @@ function syncAssignmentShiftForSelectedStaff(){
 document.querySelectorAll("#assignmentShiftOptions .shift-option").forEach(b=>{
   b.onclick=()=>{
     assignmentShiftType=b.dataset.shift;
-    document.querySelectorAll("#assignmentShiftOptions .shift-option").forEach(x=>x.classList.toggle("active",x===b));
+    saveAssignment.onclick();
   };
 });
 const closeAssignmentModalButton=document.getElementById("closeAssignmentModal");
@@ -387,8 +411,7 @@ saveAssignment.onclick=()=>{
   const staffId=Number(assignmentStaffInput.value);
   if(!dateKey || !staffId||!activeStaff(dateKey.slice(0,7)).some(st=>st.id===staffId))return;
   const key=`${dateKey}:${staffId}`;
-  setWanted(key,assignmentShiftType);
-  save();
+  if(!saveUserShift(key,assignmentShiftType,document.getElementById("assignmentWanted").checked))return;
   closeAssignmentModal();
   render();
 };
@@ -501,7 +524,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20260923-roster2',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260923-rules3',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }
@@ -546,8 +569,8 @@ function resetCurrentMonth(keepWanted){
   const month=`${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}`;
   const label=`${cursor.getFullYear()}년 ${cursor.getMonth()+1}월`;
   const message=keepWanted
-    ? `${label}의 자동 배정을 초기화할까요?\n원티드 근무·OFF·휴가는 유지합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`
-    : `${label}의 근무표를 전체 초기화할까요?\n원티드 근무·OFF·휴가와 자동 배정을 모두 삭제합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`;
+    ? `${label}의 자동 배정과 일반 수동 조정을 초기화할까요?\n체크된 원티드 근무·OFF·휴가는 유지합니다. 일반 수동 조정은 삭제합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`
+    : `${label}의 근무표를 전체 초기화할까요?\n원티드·일반 수동 조정·휴가·자동 배정을 모두 삭제합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`;
   if(!confirm(message))return false;
   const prefix=`${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}-`;
   const previous=state;
@@ -614,16 +637,17 @@ function openShiftModal(k){
   editingAssignmentKey=k;
   const parts=k.split(":");
   const s=state.staff.find(x=>x.id===Number(parts[1]));
-  const current=isVacation(k)?"V":state.assignments[k+"_type"]||"D";
+  const current=isVacation(k)?"V":state.assignments[k+"_type"]||"O";
+  document.getElementById("shiftWanted").checked=hasWanted(k)||(!hasManual(k)&&!state.assignments[k]);
   shiftModal.classList.add("open");shiftModal.setAttribute("aria-hidden","false");
-  shiftModalSubtitle.textContent=s ? `${s.name} · ${parts[0]} ${hasWanted(k)?"사용자 지정 · 자동 생성 시 보호":"자동 배정"} · 근무 형태를 변경합니다.` : "배정된 근무 형태를 변경합니다.";
+  shiftModalSubtitle.textContent=s ? `${s.name} · ${parts[0]} ${hasWanted(k)?"원티드 · 자동 생성 시 보호":hasManual(k)?"수동 조정 · 자동 생성 시 보호":"자동 배정"} · 근무 형태를 변경합니다.` : "배정된 근무 형태를 변경합니다.";
   document.querySelectorAll("#shiftOptions .shift-option").forEach(b=>b.classList.toggle("active",b.dataset.shift===current));
 }
 function closeShiftModal(){shiftModal.classList.remove("open");shiftModal.setAttribute("aria-hidden","true");editingAssignmentKey=null}
 const closeShiftModalButton=document.getElementById("closeShiftModal");
 closeShiftModalButton.onclick=closeShiftModal;
 shiftModal.addEventListener("click",e=>{if(e.target===shiftModal)closeShiftModal()});
-document.querySelectorAll("#shiftOptions .shift-option").forEach(b=>b.onclick=()=>{if(!editingAssignmentKey)return;setWanted(editingAssignmentKey,b.dataset.shift);save();closeShiftModal();render()});
+document.querySelectorAll("#shiftOptions .shift-option").forEach(b=>b.onclick=()=>{if(!editingAssignmentKey)return;if(!saveUserShift(editingAssignmentKey,b.dataset.shift,document.getElementById("shiftWanted").checked))return;closeShiftModal();render()});
 deleteAssignment.onclick=()=>{if(!editingAssignmentKey)return;releaseWanted(editingAssignmentKey);save();closeShiftModal();render()};
 
 document.addEventListener("keydown",e=>{
@@ -674,7 +698,7 @@ function shiftTiming(sh){
 function currentPlan(){
   const p={};
   Object.keys(state.assignments).filter(k=>!k.endsWith('_type')).forEach(k=>{if(state.assignments[k])p[k]=state.assignments[k+'_type']||'D'});
-  Object.assign(p,state.wanted);
+  Object.assign(p,state.manual||{},state.wanted);
   for(const k of Object.keys(p))if(!activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))delete p[k];
   return p;
 }
@@ -689,13 +713,13 @@ const HOLIDAYS_2026={
  '2026-10-05':'개천절 대체공휴일','2026-10-09':'한글날','2026-12-25':'성탄절'
 };
 const ROSTER_DEFAULTS={weekend:{HN:false,RN:true,MD:false,NK:true,AN:true},coverage:{
- weekday:{D:2,E:2,N:2,AD:1,AE:1,AN:0},saturday:{D:2,E:1,N:1,AD:1,AE:1,AN:1},holiday:{D:1,E:1,N:2,AD:1,AE:1,AN:1}}};
+ weekday:{D:2,E:2,N:2,AD:1,AE:1,AN:0},saturday:{D:2,E:1,N:1,AD:1,AE:1,AN:1},holiday:{D:1,E:1,N:1,AD:1,AE:1,AN:1}}};
 function rosterSettings(){return state.rosterSettings||ROSTER_DEFAULTS}
 function holidaysFor(year){return state.holidayYears?.[year]?.dates||(year===2026?HOLIDAYS_2026:{})}
 function holidayName(n){return holidaysFor(new Date(n*DAY_MS).getUTCFullYear())[isoDay(n)]||''}
 function dayKind(n){return holidayName(n)||new Date(n*DAY_MS).getUTCDay()===0?'holiday':new Date(n*DAY_MS).getUTCDay()===6?'saturday':'weekday'}
 function isWeekend(n){return [0,6].includes(new Date(n*DAY_MS).getUTCDay())}
-function isVacation(k){return state.leave?.[k]==='vacation'&&state.wanted[k]==='O'}
+function isVacation(k){return state.leave?.[k]==='vacation'&&fixedShift(k)==='O'}
 function displayShift(k,sh){return isVacation(k)?'휴가':sh}
 function dayAllowed(st,n){
  const role=st.category||'RN';
@@ -715,8 +739,7 @@ function dayDemands(n,cfg=schedulerConfig()){
  return [
  {key:'D',shift:'D',roles:kind==='weekday'?['HN','RN']:['RN'],min:Math.max(c.D,cfg.minimum.D),label:kind==='weekday'?'D(HN+RN)':'D(RN)'},
  {key:'E',shift:'E',roles:['RN'],min:Math.max(c.E,cfg.minimum.E),label:'E(RN)'},
- {key:'NK',shift:'N',roles:['NK'],min:Math.min(1,night),label:'N(NK)'},
- {key:'RN',shift:'N',roles:['RN'],min:Math.max(0,night-1),label:'N(RN)'},
+ ...(kind==='weekday'?[{key:'NK',shift:'N',roles:['NK'],min:Math.min(1,night),label:'N(NK)'},{key:'RN',shift:'N',roles:['RN'],min:Math.max(0,night-1),label:'N(RN)'}]:[{key:'NR',shift:'N',roles:['RN','NK'],min:night,label:'N(RN/NK)'}]),
  {key:'AD',shift:'D',roles:['AN'],min:c.AD,label:'D(AN)'},
  {key:'AE',shift:'E',roles:['AN'],min:c.AE,label:'E(AN)'},
  {key:'AN',shift:'N',roles:['AN'],min:c.AN,label:'N(AN)'},
@@ -724,13 +747,33 @@ function dayDemands(n,cfg=schedulerConfig()){
  ];
 }
 function weeklyWorkTarget(n,id,cfg){
- const st=state.staff.find(s=>s.id===id);let wantedOff=0,available=0;
+ const st=state.staff.find(s=>s.id===id);let available=0;
  for(let d=weekStart(n);d<weekStart(n)+7;d++){
    const k=isoDay(d)+':'+id;
-   if(state.wanted[k]==='O')wantedOff++;
-   if(dayAllowed(st,d)&&state.wanted[k]!=='O')available++;
+   if(dayAllowed(st,d)&&fixedShift(k)!=='O')available++;
  }
- return Math.min(available,Math.max(0,cfg.maxWeekly-wantedOff));
+ // Entered OFF is part of weekly rest, not an extra deduction from five days.
+ return Math.min(available,cfg.maxWeekly);
+}
+function offNeighbourPriority(n,id){
+ let fixedOff=0;for(let d=weekStart(n);d<weekStart(n)+7;d++)if(fixedShift(isoDay(d)+':'+id)==='O')fixedOff++;
+ if(fixedOff<2)return 0;
+ return [-1,1].filter(delta=>fixedShift(isoDay(n+delta)+':'+id)==='O').length;
+}
+function unwantedAdjacentOff(plan,dates){
+ let total=0;for(const st of activeStaff().filter(s=>s.category!=='NK'))for(const n of dates){
+  const k=isoDay(n)+':'+st.id;if(!hasFixed(k)&&!work(plan[k]))total+=offNeighbourPriority(n,st.id);
+ }return total;
+}
+function nkRestPreference(plan,dates){
+ let penalty=0;const start=dates[0],end=dates.at(-1);
+ for(const st of activeStaff().filter(s=>s.category==='NK'))for(const n of dates){
+  if(plan[isoDay(n)+':'+st.id]!=='N'||plan[isoDay(n+1)+':'+st.id]==='N')continue;
+  const run=nightRun(plan,n,st.id);let next=n+1;
+  while(next<=end&&!work(plan[isoDay(next)+':'+st.id]))next++;
+  if(next<=end)penalty+=Math.abs(next-n-1-run.length);
+ }
+ return penalty;
 }
 function weeklyWorked(plan,n,id){let count=0;for(let d=weekStart(n);d<weekStart(n)+7;d++)if(work(plan[isoDay(d)+':'+id]))count++;return count}
 function nightRun(plan,n,id){let a=n,b=n;while(plan[isoDay(a-1)+':'+id]==='N'&&n-a<31)a--;while(plan[isoDay(b+1)+':'+id]==='N'&&b-n<31)b++;return {a,b,length:b-a+1}}
@@ -749,7 +792,7 @@ function staffProblems(plan,n,st,sh,cfg){
  let hours=0;for(let d=weekStart(n);d<weekStart(n)+7;d++)if(work(get(d)))hours+=shiftTiming(get(d))?.hours||0;
  const weekly=Array.from({length:7},(_,i)=>get(weekStart(n)+i)).filter(work).length;
  if(weekly>cfg.maxWeekly)errors.push(`주 ${cfg.maxWeekly}일 상한 초과`);
- else if(weekly>weeklyWorkTarget(n,id,cfg))errors.push('기본 OFF·원티드 OFF 부족');
+ else if(weekly>weeklyWorkTarget(n,id,cfg))errors.push('입력 OFF·근무 가능일 조건 위반');
  if(hours>40+1e-8)errors.push('주 40시간 상한 초과');
  let run=1;for(let d=n-1;d>=n-31&&work(get(d));d--)run++;for(let d=n+1;d<=n+31&&work(get(d));d++)run++;
  if(run>cfg.maxConsecutive)errors.push(`연속 ${cfg.maxConsecutive}일 상한 초과`);
@@ -770,10 +813,15 @@ function staffProblems(plan,n,st,sh,cfg){
 }
 function canPlace(plan,n,st,sh,cfg){
  const k=isoDay(n)+':'+st.id,role=st.category||'RN';
- if(hasWanted(k)||work(plan[k])||!dayAllowed(st,n))return false;
+ if(hasFixed(k)||work(plan[k])||!dayAllowed(st,n))return false;
  if(weeklyWorked(plan,n,st.id)>=weeklyWorkTarget(n,st.id,cfg))return false;
  const pool=role==='AN'?['AN']:['HN','RN','NK','MD'];
  if(countShift(plan,n,sh,pool)>=cfg.maximum[sh])return false;
+ if(role==='RN'&&dayKind(n)!=='weekday'&&['D','E'].includes(sh)){
+   const demand=dayDemands(n,cfg).find(d=>d.shift===sh&&d.roles.includes(role));
+   if(demand&&countShift(plan,n,sh,demand.roles)>=demand.min)return false;
+ }
+ if(role==='NK'&&sh==='N'&&getMonthDates().filter(d=>plan[keyFor(d,st.id)]==='N').length>=Math.ceil(getMonthDates().length/2))return false;
  if(sh==='N'){
    const demand=dayDemands(n,cfg).find(d=>d.shift==='N'&&d.roles.includes(role));
    if(!demand||countShift(plan,n,'N',demand.roles)>=demand.min)return false;
@@ -792,18 +840,19 @@ function workTargetGaps(plan,cfg=schedulerConfig()){
    let actual=0,eligible=0,outside=0;
    for(let d=monday;d<monday+7;d++){
      const k=isoDay(d)+':'+st.id;
-     if(inMonth.has(d)){if(work(plan[k]))actual++;if(dayAllowed(st,d)&&state.wanted[k]!=='O')eligible++}
+     if(inMonth.has(d)){if(work(plan[k]))actual++;if(dayAllowed(st,d)&&fixedShift(k)!=='O')eligible++}
      else if(work(plan[k]))outside++;
    }
    const target=Math.min(eligible,Math.max(0,weeklyWorkTarget(monday,st.id,cfg)-outside));
-   if(actual<target)gaps.push({name:st.name,id:st.id,monday,target,actual,missing:target-actual,freeDates:dates.filter(d=>weekStart(d)===monday&&dayAllowed(st,d)&&!hasWanted(isoDay(d)+':'+st.id)&&!work(plan[isoDay(d)+':'+st.id]))});
+   if(actual<target)gaps.push({name:st.name,id:st.id,monday,target,actual,missing:target-actual,freeDates:dates.filter(d=>weekStart(d)===monday&&dayAllowed(st,d)&&!hasFixed(isoDay(d)+':'+st.id)&&!work(plan[isoDay(d)+':'+st.id]))});
  }
  return gaps;
 }
 function nkBalance(plan){
  const dates=getMonthDates(),nk=activeStaff().filter(s=>s.category==='NK');
  const counts=nk.map(s=>dates.filter(d=>plan[keyFor(d,s.id)]==='N').length);
- return {nk,counts,penalty:nk.length===2?counts.reduce((sum,c)=>sum+Math.max(0,Math.floor(dates.length/2)-c,c-Math.ceil(dates.length/2)),0):0};
+ const lo=Math.floor(dates.length/2),hi=Math.ceil(dates.length/2);
+ return {nk,counts,penalty:nk.length===2?Math.min(Math.abs(counts[0]-lo)+Math.abs(counts[1]-hi),Math.abs(counts[0]-hi)+Math.abs(counts[1]-lo)):counts.reduce((sum,c)=>sum+Math.abs(c-lo),0)};
 }
 function analyzeMonth(plan=currentPlan()){
  const cfg=schedulerConfig(),issues={},dates=getMonthDates(),start=dayNumber(keyFor(dates[0],0).split(':')[0]),end=start+dates.length-1;
@@ -817,12 +866,12 @@ function analyzeMonth(plan=currentPlan()){
    for(const sh of ['D','E','N','M'])for(const pool of [['HN','RN','NK','MD'],['AN']])if(countShift(plan,n,sh,pool)>cfg.maximum[sh])add(n,`${pool[0]==='AN'?'AN':'간호사'} ${sh} 최대 인원 초과`);
    for(const st of activeStaff()){
      const k=isoDay(n)+':'+st.id,sh=plan[k],role=st.category||'RN';
-     for(const e of staffProblems(plan,n,st,sh,cfg))add(n,`${st.name}: ${e}${hasWanted(k)?' (사용자 지정 유지)':''}`);
+     for(const e of staffProblems(plan,n,st,sh,cfg))add(n,`${st.name}: ${e}${hasFixed(k)?' (사용자 지정 유지)':''}`);
      if(sh==='O'&&role==='NK'){
        let off=1;
        for(let d=n-1;d>=n-4&&plan[isoDay(d)+':'+st.id]==='O';d--)off++;
        for(let d=n+1;d<=n+4&&plan[isoDay(d)+':'+st.id]==='O';d++)off++;
-       if(off>3)add(n,`${st.name}: NK 연속 OFF 3일 초과${hasWanted(k)?' (사용자 지정 유지)':''}`);
+       if(off>3)add(n,`${st.name}: NK 연속 OFF 3일 초과${hasFixed(k)?' (사용자 지정 유지)':''}`);
      }
      if(sh==='N'&&['RN','NK'].includes(role)){
        const block=nightRun(plan,n,st.id);
@@ -849,6 +898,8 @@ function showValidation(){
 // Two NK workers alternate complete 2/3-day blocks, with floor/ceil(month/2) targets.
 function nkTemplate(days,attempt){
  const targets=attempt%2?[Math.ceil(days/2),Math.floor(days/2)]:[Math.floor(days/2),Math.ceil(days/2)];
+ if(days%6===0&&attempt%6<2)return Array.from({length:days/3},(_,i)=>({who:(i+attempt)%2,len:3}));
+ if(days%4===0&&attempt%6<2)return Array.from({length:days/2},(_,i)=>({who:(i+attempt)%2,len:2}));
  const memo=new Set();
  function visit(a,b,who,depth){
    if(a+b===days)return [];
@@ -882,7 +933,7 @@ function repairDayTargets(plan,cfg,dates){
    outer:for(const g of gaps){
      const st=state.staff.find(s=>s.id===g.id),shifts=allowedShifts(st.category).filter(sh=>work(sh)&&sh!=='N');
      for(const n of g.freeDates)for(const r of dates.filter(d=>Math.abs(n-d)<=7)){
-       const rk=isoDay(r)+':'+st.id,old=plan[rk];if(!work(old)||old==='N'||hasWanted(rk))continue;
+       const rk=isoDay(r)+':'+st.id,old=plan[rk];if(!work(old)||old==='N'||hasFixed(rk))continue;
        const dm=dayDemands(r,cfg).find(d=>d.shift===old&&d.roles.includes(st.category));
        if(dm&&countShift(plan,r,old,dm.roles)<=dm.min)continue;
        const trial={...plan};delete trial[rk];
@@ -904,20 +955,20 @@ function solveMonth(){
  const cfg=schedulerConfig(),dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),start=dates[0],end=dates.at(-1),month=isoDay(start).slice(0,7);
  const current=currentPlan(),baseline={},fixed={};
  for(const [k,v]of Object.entries(current))if(!k.startsWith(month+'-'))fixed[k]=v;
- for(const [k,v]of Object.entries(state.wanted))if(activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))fixed[k]=v;
+ for(const [k,v]of Object.entries({...state.manual,...state.wanted}))if(activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))fixed[k]=v;
  for(const n of dates)for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;baseline[k]=state.generationSnapshot?.month===month?state.generationSnapshot.shifts[k]??current[k]:current[k]}
  const nk=activeStaff().filter(s=>s.category==='NK');let best=null;
  for(let attempt=0;attempt<36;attempt++){
    let plan={...fixed},seed=731+attempt*7919;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+   if(nk.length===2){let n=start;for(const block of nkTemplate(dates.length,attempt)){
+     const trial=addNightBlock(plan,nk[block.who],n,block.len,cfg,start,end);if(trial)plan=trial;n+=block.len;
+   }}
    // Keep previous valid night blocks first on one third of attempts.
    if(attempt%3===0)for(const st of activeStaff())for(const n of dates){
      if(baseline[isoDay(n)+':'+st.id]!=='N'||baseline[isoDay(n-1)+':'+st.id]==='N')continue;
      let len=1;while(n+len<=end&&baseline[isoDay(n+len)+':'+st.id]==='N')len++;
      if(len>=2&&len<=3||st.category==='AN'&&len===1){const trial=addNightBlock(plan,st,n,len,cfg,start,end);if(trial)plan=trial}
    }
-   if(nk.length===2){let n=start;for(const block of nkTemplate(dates.length,attempt)){
-     const trial=addNightBlock(plan,nk[block.who],n,block.len,cfg,start,end);if(trial)plan=trial;n+=block.len;
-   }}
    // Fill night demand with whole blocks; all two-day post-night rest checks include future wanteds.
    for(const n of dates)for(const demand of dayDemands(n,cfg).filter(d=>d.shift==='N')){
      while(countShift(plan,n,'N',demand.roles)<demand.min){
@@ -937,7 +988,8 @@ function solveMonth(){
              const need=x=>{if(x<start||x>end)return false;const dm=dayDemands(x,cfg).find(q=>q.shift==='N'&&q.roles.includes(st.category));return dm&&countShift(trial,x,'N',dm.roles)<dm.min};
              if(need(d)&&!need(d-1)&&!need(d+1))stranded++;
            }
-           options.push({trial,score:stranded*100-gain*20+changes*3+total+random()*5});
+           const restConflict=st.category==='NK'?0:[a+len,a+len+1].filter(d=>d<=end&&!hasFixed(isoDay(d)+':'+st.id)&&offNeighbourPriority(d,st.id)>0).length;
+           options.push({trial,score:restConflict*80+stranded*100-gain*20+changes*3+total+random()*5});
          }
        }
        if(!options.length)break;options.sort((a,b)=>a.score-b.score);plan=options[0].trial;
@@ -950,7 +1002,7 @@ function solveMonth(){
      while(countShift(plan,n,d.shift,d.roles)<d.min){
        const options=activeStaff().filter(st=>d.roles.includes(st.category||'RN')&&canPlace(plan,n,st,d.shift,cfg)).map(st=>{
          const k=isoDay(n)+':'+st.id,prev=plan[isoDay(n-1)+':'+st.id];
-         return {st,score:(baseline[k]===d.shift?-20:0)+(prev===d.shift?-4:0)+weeklyWorked(plan,n,st.id)*2+random()*8};
+         return {st,score:-60*offNeighbourPriority(n,st.id)+(baseline[k]===d.shift?-20:0)+(prev===d.shift?-4:0)+weeklyWorked(plan,n,st.id)*2+random()*8};
        }).sort((a,b)=>a.score-b.score);
        if(!options.length)break;plan[isoDay(n)+':'+options[0].st.id]=d.shift;
      }
@@ -959,14 +1011,14 @@ function solveMonth(){
    for(const st of activeStaff().filter(s=>s.category!=='NK'))for(let loop=0;loop<dates.length;loop++){
      const options=[];for(const n of dates)for(const sh of allowedShifts(st.category||'RN').filter(s=>work(s)&&s!=='N')){
        if(!canPlace(plan,n,st,sh,cfg))continue;const k=isoDay(n)+':'+st.id;
-       options.push({k,sh,score:(baseline[k]===sh?-20:0)+(plan[isoDay(n-1)+':'+st.id]===sh?-4:0)+countShift(plan,n,sh,[st.category])*2+random()*6});
+       options.push({k,sh,score:-60*offNeighbourPriority(n,st.id)+(baseline[k]===sh?-20:0)+(plan[isoDay(n-1)+':'+st.id]===sh?-4:0)+countShift(plan,n,sh,[st.category])*2+random()*6});
      }
      if(!options.length)break;options.sort((a,b)=>a.score-b.score);plan[options[0].k]=options[0].sh;
    }
    repairDayTargets(plan,cfg,dates);
    let missing=0,changes=0;
    for(const n of dates){for(const d of dayDemands(n,cfg))missing+=Math.max(0,d.min-countShift(plan,n,d.shift,d.roles));for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;plan[k]??='O';if(baseline[k]!==undefined&&baseline[k]!==plan[k])changes++}}
-   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[missing,balance,unfilled,changes];
+   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[balance,missing,unfilled,nkRestPreference(plan,dates),unwantedAdjacentOff(plan,dates),changes];
    const better=!best||score.some((v,i)=>v<best.score[i]&&score.slice(0,i).every((x,j)=>x===best.score[j]));
    if(better)best={plan,missing,changes,unfilled,month,score};
    if(score.every(v=>v===0))break;
@@ -1014,7 +1066,7 @@ function generateMonth(){
 }
 autoGenerate.onclick=()=>{
   if(!activeStaff().length){alert('이번 달 편성 인원을 선택해주세요.');return}
-  if(!confirm('사용자 지정·휴가를 보호하고 직군별/요일별 인원과 N 묶음 규칙으로 생성할까요?\nNK는 월 절반씩 교대, RN은 N 2~3일 뒤 OFF 2일을 적용합니다. AN은 별도 인원입니다. 충족하지 못한 날짜는 붉은색으로 표시합니다.'+(state.shiftTimesConfirmed?'':'\n주의: 시간 설정이 아직 예시입니다. 실제 운영 전에 편성 규칙에서 확인해주세요.')))return;
+  if(!confirm('원티드·일반 수동 조정·휴가를 보호하고 직군별/요일별 인원과 N 묶음 규칙으로 생성할까요?\nNK는 월 절반씩 교대, RN은 N 2~3일 뒤 OFF 2일을 적용합니다. AN은 별도 인원입니다. 충족하지 못한 날짜는 붉은색으로 표시합니다.'+(state.shiftTimesConfirmed?'':'\n주의: 시간 설정이 아직 예시입니다. 실제 운영 전에 편성 규칙에서 확인해주세요.')))return;
   autoGenerate.disabled=true;autoGenerate.textContent='편성 중…';
   setTimeout(()=>{try{generateMonth()}finally{autoGenerate.disabled=false;autoGenerate.textContent='자동 생성'}},30);
 };

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>소형 병원 간호사 스케줄러</title>
-<link rel="stylesheet" href="./nurse-scheduler.css?v=20260923-roster2">
+<link rel="stylesheet" href="./nurse-scheduler.css?v=20260923-rules3">
 </head>
 <body>
 <div class="app">
@@ -22,7 +22,7 @@
   </section>
 </aside>
 <main class="content">
-  <div class="calendar-head"><div><div class="title-line"><h2 id="scheduleViewTitle">월간 스케줄</h2><div class="view-switch" aria-label="스케줄 보기 전환"><button id="calendarViewBtn" class="active" type="button">캘린더</button><button id="tableViewBtn" type="button">근무표</button></div></div><p id="scheduleViewHint">간호사 목록 → 날짜로 Drag & Drop</p></div><div class="head-actions"><button class="ghost" id="monthStaffSettings" type="button">이번 달 편성 인원</button><button class="ghost" id="ruleSettings">편성 규칙</button><button class="primary" id="autoGenerate">자동 생성</button><button class="ghost" id="exportExcel">엑셀 출력</button><button class="ghost" id="clearAuto" type="button" title="현재 월의 자동 배정만 삭제하고 원티드 근무·OFF·휴가는 유지">원티드 유지 초기화</button><button class="ghost" id="clear" type="button" title="현재 월의 원티드·휴가·자동 배정을 모두 삭제">월 전체 초기화</button></div></div>
+  <div class="calendar-head"><div><div class="title-line"><h2 id="scheduleViewTitle">월간 스케줄</h2><div class="view-switch" aria-label="스케줄 보기 전환"><button id="calendarViewBtn" class="active" type="button">캘린더</button><button id="tableViewBtn" type="button">근무표</button></div></div><p id="scheduleViewHint">간호사 목록 → 날짜로 Drag & Drop</p></div><div class="head-actions"><button class="ghost" id="monthStaffSettings" type="button">이번 달 편성 인원</button><button class="ghost" id="ruleSettings">편성 규칙</button><button class="primary" id="autoGenerate">자동 생성</button><button class="ghost" id="exportExcel">엑셀 출력</button><button class="ghost" id="clearAuto" type="button" title="현재 월의 자동 배정·일반 수동 조정을 삭제하고 체크된 원티드는 유지">원티드 유지 초기화</button><button class="ghost" id="clear" type="button" title="현재 월의 원티드·휴가·자동 배정을 모두 삭제">월 전체 초기화</button></div></div>
   <div id="generationStatus" class="generation-status" role="status" aria-live="polite"></div>
   <div class="calendar" id="calendar"></div>
   <div class="schedule-table-wrap" id="scheduleTableWrap"><table class="schedule-table" id="scheduleTable"></table></div>
@@ -48,6 +48,7 @@
       </div>
       <div style="margin-top:18px">
         <label style="display:block;font-size:clamp(13px,0.82vw,15px);font-weight:600;color:#4e5660;margin-bottom:8px">근무 형태</label>
+        <label class="wanted-toggle"><input type="checkbox" id="assignmentWanted" checked> 원티드로 등록</label><p class="hint">체크 해제 시 일반 수동 조정입니다. 근무 버튼을 누르면 바로 저장됩니다.</p>
         <div class="shift-options" id="assignmentShiftOptions">
           <button class="shift-option active" data-shift="D">D · Day</button>
           <button class="shift-option" data-shift="E">E · Evening</button>
@@ -57,7 +58,7 @@
           <button class="shift-option vacation-option" data-shift="V">휴가 · O</button>
         </div>
       </div>
-      <p class="hint" style="margin-top:12px">직접 등록한 D/E/N/M/O는 사용자 지정으로 보호됩니다. O는 지정 OFF입니다. 휴가는 별도로 선택하며 휴가 잔여일은 계산하지 않습니다.</p>
+      <p class="hint" style="margin-top:12px">원티드와 일반 수동 조정 모두 자동 생성에서 보호됩니다. O는 지정 OFF입니다. 휴가는 별도로 선택하며 휴가 잔여일은 계산하지 않습니다.</p>
     </div>
     <div class="modal-bottom">
       <button class="ghost" id="cancelAssignmentModal">취소</button>
@@ -119,6 +120,7 @@
       <button class="modal-close" id="closeShiftModal">×</button>
     </div>
     <div class="modal-body">
+      <label class="wanted-toggle"><input type="checkbox" id="shiftWanted" checked> 원티드로 등록</label><p class="hint">체크 여부를 정한 뒤 근무 버튼을 누르면 바로 저장됩니다. 두 종류 모두 자동 생성이 보호합니다.</p>
       <div class="shift-options" id="shiftOptions">
         <button class="shift-option" data-shift="D">D · Day</button>
         <button class="shift-option" data-shift="E">E · Evening</button>
@@ -176,6 +178,6 @@
   <div id="monthStaffChoices"></div>
   <div class="month-staff-actions"><button id="cancelMonthStaff" type="button" class="ghost">취소</button><button id="saveMonthStaff" type="button" class="primary">저장</button></div>
 </dialog>
-<script src="./nurse-scheduler.js?v=20260923-roster2"></script>
+<script src="./nurse-scheduler.js?v=20260923-rules3"></script>
 </body>
 </html>

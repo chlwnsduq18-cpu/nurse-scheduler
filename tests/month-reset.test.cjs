@@ -41,3 +41,10 @@ test('cancellation and storage failure preserve prior data',()=>{
   const {ctx,buttons,before}=setup(config);buttons[button].onclick();assert.equal(JSON.stringify(ctx.state),before);
  }
 });
+test('wanted-only reset removes general manual adjustments but keeps wanted records',()=>{
+ const {ctx}=setup();ctx.state.manual={'2026-09-12:1':'D','2026-10-12:1':'E'};
+ ctx.state.assignments['2026-09-12:1']=1;ctx.state.assignments['2026-09-12:1_type']='D';
+ assert.equal(ctx.resetCurrentMonth(true),true);
+ assert.equal(ctx.state.manual['2026-09-12:1'],undefined);assert.equal(ctx.state.manual['2026-10-12:1'],'E');
+ assert.equal(ctx.state.wanted['2026-09-01:1'],'D');
+});
