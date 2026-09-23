@@ -419,46 +419,82 @@ function getMonthDates(){
   return Array.from({length:days},(_,i)=>new Date(y,m,i+1));
 }
 
-exportExcel.onclick=()=>{
-  if(typeof XLSX==="undefined"){
-    alert("엑셀 모듈을 불러오지 못했습니다. 인터넷 연결 후 다시 시도해주세요.");
+// Local dependencies are loaded only when exporting. Paths resolve next to index.html.
+let excelModulesPromise;
+function loadExcelModules(){
+  if(excelModulesPromise)return excelModulesPromise;
+  const load=(path,ready)=>ready()?Promise.resolve():new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    script.src=new URL(path,document.baseURI).href;
+    script.onload=()=>ready()?resolve():reject(new Error('엑셀 모듈 초기화에 실패했습니다: '+path));
+    script.onerror=()=>{script.remove();reject(new Error(path+' 파일을 불러오지 못했습니다. 배포 파일을 확인해주세요.'));};
+    document.head.appendChild(script);
+  });
+  excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
+    .then(()=>load('nurse-scheduler-excel.js',()=>!!globalThis.NurseSchedulerExcel))
+    .catch(error=>{excelModulesPromise=null;throw error;});
+  return excelModulesPromise;
+}
+exportExcel.onclick=async()=>{
+  if(exportExcel.disabled)return;
+  if(location.protocol==='file:'){
+    alert('템플릿을 읽으려면 GitHub Pages 또는 http://localhost:8080에서 사이트를 열어주세요. HTML 파일을 직접 열면 브라우저가 엑셀 파일 접근을 제한합니다.');
     return;
   }
-  const dates=getMonthDates();
-  const y=cursor.getFullYear(),m=cursor.getMonth();
-  const rows=[];
-  const header=["간호사","분류","경력",...dates.map(d=>`${d.getMonth()+1}/${d.getDate()}`)];
-  rows.push(header);
-  state.staff.forEach(s=>{
-    const row=[s.name,s.category||"RN",s.career||0];
-    dates.forEach(d=>{
-      const k=keyFor(d,s.id);
-      row.push(displayShift(k,state.assignments[k] ? (state.assignments[k+"_type"]||"D") : "O"));
-    });
-    rows.push(row);
-  });
-
-  const ws=XLSX.utils.aoa_to_sheet(rows);
-  ws["!freeze"]={xSplit:3,ySplit:1};
-  ws["!cols"]=[
-    {wch:12},{wch:8},{wch:7},
-    ...dates.map(()=>({wch:5}))
-  ];
-  const wb=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb,ws,`${y}년 ${m+1}월`);
-  const issues=Object.entries(analyzeMonth());
-  if(issues.length)XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['날짜','확인 사유'],...issues.map(([d,reasons])=>[d,reasons.join(' / ')])]),'편성 확인');
-  XLSX.writeFile(wb,`간호사_근무표_${y}-${pad(m+1)}.xlsx`);
+  // Capture the visible month before any asynchronous work so navigation cannot mix months.
+  const dates=getMonthDates(),year=cursor.getFullYear(),month=cursor.getMonth()+1;
+  const options={year,month,spareRows:1,holidays:{...holidaysFor(year)},
+    issues:Object.entries(analyzeMonth()),
+    staff:state.staff.map(st=>({id:st.id,name:st.name,category:st.category||'RN',
+      shifts:dates.map(d=>{const k=keyFor(d,st.id);return displayShift(k,state.assignments[k]?(state.assignments[k+'_type']||'D'):'O');})}))};
+  const label=exportExcel.textContent;
+  exportExcel.disabled=true;exportExcel.textContent='엑셀 작성 중…';
+  try{
+    await loadExcelModules();
+    const response=await fetch(new URL('nurse_scheduler_template.xlsx',document.baseURI),{cache:'no-store'});
+    if(!response.ok)throw new Error('nurse_scheduler_template.xlsx를 찾을 수 없습니다. index.html과 같은 폴더에 파일을 두고 함께 업로드해주세요. (HTTP '+response.status+')');
+    const bytes=await response.arrayBuffer();
+    if(new Uint8Array(bytes)[0]!==0x50||new Uint8Array(bytes)[1]!==0x4b)throw new Error('템플릿이 올바른 .xlsx 파일이 아닙니다. 파일명과 배포 경로를 확인해주세요.');
+    const result=await NurseSchedulerExcel.build(bytes,options);
+    const url=URL.createObjectURL(new Blob([result.bytes],{type:result.mimeType}));
+    const link=document.createElement('a');link.href=url;link.download=result.filename;
+    document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
+  }catch(error){
+    console.error('Excel template export failed',error);
+    alert('엑셀을 출력하지 못했습니다.\n'+(error.message||String(error)));
+  }finally{exportExcel.disabled=false;exportExcel.textContent=label;}
 };
 
 function esc(s){return String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
 add.onclick=()=>openStaffModal();
 prev.onclick=()=>{cursor.setMonth(cursor.getMonth()-1);render()};
 next.onclick=()=>{cursor.setMonth(cursor.getMonth()+1);render()};
-clear.onclick=()=>{if(confirm("현재 월의 사용자 지정, 자동 배정 및 해당 월 스냅샷을 모두 지울까요?")){
+// Reset only the visible month. The wanted map is the source of truth, including
+// explicit OFF and vacation, rather than inferring manual entries from the grid.
+function resetCurrentMonth(keepWanted){
+  const month=`${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}`;
+  const label=`${cursor.getFullYear()}년 ${cursor.getMonth()+1}월`;
+  const message=keepWanted
+    ? `${label}의 자동 배정을 초기화할까요?\n원티드 근무·OFF·휴가는 유지합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`
+    : `${label}의 근무표를 전체 초기화할까요?\n원티드 근무·OFF·휴가와 자동 배정을 모두 삭제합니다.\n이 달의 자동생성 스냅샷도 삭제합니다.`;
+  if(!confirm(message))return false;
   const prefix=`${cursor.getFullYear()}-${pad(cursor.getMonth()+1)}-`;
-  removeRelated(k=>k.startsWith(prefix));save();render();
-}};
+  const previous=state;
+  state=JSON.parse(JSON.stringify(previous));
+  removeRelated(k=>k.startsWith(prefix));
+  if(state.generationSnapshot?.month===month)state.generationSnapshot=null;
+  if(keepWanted){
+    Object.entries(previous.wanted).forEach(([k,shift])=>{
+      if(!k.startsWith(prefix))return;
+      state.wanted[k]=shift;putAssignment(k,shift);
+      if(Object.prototype.hasOwnProperty.call(previous.leave,k))state.leave[k]=previous.leave[k];
+    });
+  }
+  if(!save()){state=previous;render();return false;}
+  render();return true;
+}
+document.getElementById('clearAuto').onclick=()=>resetCurrentMonth(true);
+clear.onclick=()=>resetCurrentMonth(false);
 
 function openStaffModal(id=null){
   staffModal.classList.add("open");

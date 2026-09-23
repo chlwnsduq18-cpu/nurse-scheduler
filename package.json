@@ -1,0 +1,6 @@
+{
+  "name": "nurse-scheduler",
+  "private": true,
+  "scripts": { "test": "node --test tests/*.test.cjs" },
+  "devDependencies": { "@xmldom/xmldom": "0.8.11" }
+}
