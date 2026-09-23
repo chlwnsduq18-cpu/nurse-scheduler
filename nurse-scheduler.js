@@ -124,21 +124,24 @@ function render(){
   monthTitle.textContent=`${y}년 ${m+1}월`;
   staffList.innerHTML="";
   state.staff.forEach(s=>{
-    const el=document.createElement("div"); el.className="staff"; el.draggable=activeStaff().some(st=>st.id===s.id); el.dataset.id=s.id;
-    el.innerHTML=`<button type="button" class="staff-order-handle" draggable="true" title="끌어서 순서 변경 · 위/아래 방향키로 이동" aria-label="${esc(s.name)} 순서 변경">↕</button><div class="staff-info"><span class="dot"></span><div class="staff-main"><span class="staff-name">${esc(s.name)}</span><span class="staff-category" data-category="${esc(s.category||"RN")}">${esc(s.category||"RN")}</span></div></div><div><button class="del edit" title="정보 수정">정보</button><button class="del" title="삭제">×</button></div>`;
-    el.classList.toggle('staff-excluded',!el.draggable);
-    el.addEventListener("dragstart",e=>{if(e.target.closest('.staff-order-handle'))return;e.dataTransfer.setData("staffId",s.id)});
-    const handle=el.querySelector('.staff-order-handle');
-    handle.ondragstart=e=>{e.stopPropagation();e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('application/x-staff-order',String(s.id))};
-    handle.onkeydown=e=>{
-      if(!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();
+    const el=document.createElement("div"); el.className="staff"; el.draggable=true; el.tabIndex=0; el.title="끌어서 목록 순서 변경 또는 날짜에 배정 · Alt+위/아래로 순서 변경"; el.dataset.id=s.id;
+    el.innerHTML=`<div class="staff-info"><span class="dot"></span><div class="staff-main"><span class="staff-name">${esc(s.name)}</span><span class="staff-category" data-category="${esc(s.category||"RN")}">${esc(s.category||"RN")}</span></div></div><div><button class="del edit" title="정보 수정">정보</button><button class="del" title="삭제">×</button></div>`;
+    el.classList.toggle('staff-excluded',!activeStaff().some(st=>st.id===s.id));
+    el.ondragstart=e=>{
+      if(e.target.closest('button')){e.preventDefault();return}
+      e.dataTransfer.effectAllowed='move';
+      e.dataTransfer.setData('application/x-staff-order',String(s.id));
+      e.dataTransfer.setData('staffId',String(s.id));
+    };
+    el.onkeydown=e=>{
+      if(e.target!==el||!e.altKey||!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();
       const index=state.staff.findIndex(st=>st.id===s.id),target=state.staff[index+(e.key==='ArrowUp'?-1:1)];
-      if(target&&reorderStaff(s.id,target.id,e.key==='ArrowDown')){render();staffList.querySelector(`[data-id="${s.id}"] .staff-order-handle`)?.focus()}
+      if(target&&reorderStaff(s.id,target.id,e.key==='ArrowDown')){render();staffList.querySelector(`[data-id="${s.id}"]`)?.focus()}
     };
     el.ondragover=e=>{if(Array.from(e.dataTransfer.types).includes('application/x-staff-order')){e.preventDefault();el.classList.add('reorder-over')}};
     el.ondragleave=()=>el.classList.remove('reorder-over');
     el.ondrop=e=>{const id=Number(e.dataTransfer.getData('application/x-staff-order'));if(!id)return;e.preventDefault();e.stopPropagation();el.classList.remove('reorder-over');if(reorderStaff(id,s.id,e.clientY>el.getBoundingClientRect().top+el.getBoundingClientRect().height/2))render()};
-    handle.ondragend=()=>staffList.querySelectorAll('.reorder-over').forEach(n=>n.classList.remove('reorder-over'));
+    el.ondragend=()=>staffList.querySelectorAll('.reorder-over').forEach(n=>n.classList.remove('reorder-over'));
     el.querySelector(".edit").onclick=()=>openStaffModal(s.id);
     el.querySelector(".del:not(.edit)").onclick=()=>{
       if(confirm(`${s.name} 간호사를 삭제할까요?`)){
@@ -498,7 +501,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20260923-roster1',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260923-roster2',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }

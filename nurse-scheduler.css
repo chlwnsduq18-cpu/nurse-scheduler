@@ -626,8 +626,6 @@ button,input,select{font-size:inherit}
 #holidayDates{width:100%;box-sizing:border-box;font:13px/1.6 monospace}.public-holiday .num,.schedule-table .public-holiday .date-num{color:#b64b4b}
 
 /* Staff order and monthly membership */
-.staff-order-handle{cursor:grab;flex:0 0 32px;padding:6px 2px;font-size:22px;background:transparent;border:1px solid #c5ccd5;border-radius:6px;color:#26384c}
-.staff-order-handle:active{cursor:grabbing}
 .staff-excluded .staff-info{opacity:.45}
 .staff.reorder-over{outline:3px solid #0050a4;outline-offset:-3px}
 #monthStaffDialog{width:min(560px,90vw);max-height:85vh;overflow:auto;border:1px solid #b9c4d1;border-radius:16px;padding:24px;color:#20252c}
@@ -636,3 +634,16 @@ button,input,select{font-size:inherit}
 .month-staff-choice{display:flex;align-items:center;gap:14px;padding:12px;border-bottom:1px solid #e1e5ea;font-size:18px}
 .month-staff-choice input{width:22px;height:22px;flex-shrink:0}
 .month-staff-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
+
+#staffList .staff{gap:6px;padding-left:6px;padding-right:6px}
+#staffList .staff-info{gap:6px;flex:1;min-width:0}
+#staffList .dot{flex:0 0 10px;width:10px;height:10px}
+#staffList .staff-main{display:grid;grid-template-columns:minmax(3em,1fr) auto;gap:5px;flex:1;min-width:0}
+#staffList .staff-name{display:block;min-width:0}
+#staffList .staff-category{min-width:26px;padding:0 4px}
+#staffList .staff > div:last-child{gap:0}
+#staffList .del{padding:6px 4px;white-space:nowrap}
+#staffList .staff:focus-visible{outline:2px solid #0050a4;outline-offset:-2px}
+.month-staff-actions button{min-width:76px;min-height:44px;padding:10px 18px;border-radius:10px;font-size:16px;font-weight:600;line-height:1.4}
+.month-staff-actions .ghost{background:#fff;color:#303943;border:1px solid #c5cdd6}
+.month-staff-actions .ghost:hover{background:#f0f3f6}
