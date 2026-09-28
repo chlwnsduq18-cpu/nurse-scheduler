@@ -91,7 +91,7 @@ test('export button captures month, loads relative template, restores button and
   document:{baseURI:'http://localhost:8080/nurse-scheduler/index.html',head:{appendChild(){}},body:{appendChild(){}},createElement(){return {click(){urls.push(this.download)},remove(){}}}},
   exportExcel:button,JSZip,NurseSchedulerExcel:{async build(bytes,options){exported.push(options);return {bytes:new Uint8Array([80,75]),mimeType:'test',filename:'test.xlsx'}}},
   cursor:new Date(2026,8,1),getMonthDates:()=>[new Date(2026,8,1)],holidaysFor:()=>({'2026-09-24':'추석'}),analyzeMonth:()=>({}),
-  activeStaff:()=>fake.state.staff,state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
+  hasManual:()=>false,activeStaff:()=>fake.state.staff,state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
   alert:m=>alerts.push(m),async fetch(path){requests.push(String(path));fake.cursor=new Date(2026,9,1);return {ok:!fail,status:404,arrayBuffer:async()=>new Uint8Array([80,75]).buffer}}
  };fake.globalThis=fake;vm.runInNewContext(code,fake);await button.onclick();
  assert.equal(exported[0].staff[0].wanted[0],true);assert.equal(exported[0].month,9);assert.equal(exported[0].staff[0].shifts[0],'N');assert.equal(requests[0],'http://localhost:8080/nurse-scheduler/nurse_scheduler_template.xlsx');assert.equal(urls.length,1);assert.equal(button.disabled,false);
@@ -100,7 +100,7 @@ test('export button captures month, loads relative template, restores button and
 });
 test('background colors follow wanted provenance, holiday and explicit OFF priority',async()=>{
  const p=staff('RN','색상검증');
- p.shifts.fill('O');p.wanted=Array(30).fill(false);
+ p.shifts.fill('O');p.wanted=Array(30).fill(false);p.manual=Array(30).fill(false);p.manual[27]=true;p.shifts[27]='D';
  // Sept 2026: 1-4 weekdays, 5 Saturday, 6 Sunday, 24 holiday.
  p.shifts[0]='D';p.shifts[1]='D';p.wanted[1]=true;
  p.wanted[2]=true;p.shifts[3]='휴가';p.wanted[3]=true;
@@ -111,10 +111,10 @@ test('background colors follow wanted provenance, holiday and explicit OFF prior
  const fills=elements(nodes(styles,'fills')[0]),xfs=elements(nodes(styles,'cellXfs')[0]);
  const fill=ref=>fills[Number(xfs[Number(cell(doc,ref).getAttribute('s'))].getAttribute('fillId'))];
  const rgb=ref=>nodes(fill(ref),'fgColor')[0]?.getAttribute('rgb');
- for(const ref of ['D9','F9','I9','AC9','AH9'])assert.equal(rgb(ref),'FFFFFFFF',ref+' must be white');
+ for(const ref of ['D9','F9','I9','AC9','AH9','AE9'])assert.equal(rgb(ref),'FFFFFFFF',ref+' must be white');
  for(const ref of ['E9','G9','AA9','AB9'])assert.equal(rgb(ref),'FF0050A4',ref+' must be blue');
  const serialize=n=>new XMLSerializer().serializeToString(n);
- for(const ref of ['H9','AE9','H10'])assert.equal(serialize(fill(ref)),serialize(fill('H7')),ref+' must match template holiday yellow');
+ for(const ref of ['H9','H10'])assert.equal(serialize(fill(ref)),serialize(fill('H7')),ref+' must match template holiday yellow');
  const fonts=elements(nodes(styles,'fonts')[0]);
  const fontRgb=ref=>nodes(fonts[Number(xfs[Number(cell(doc,ref).getAttribute('s'))].getAttribute('fontId'))],'color')[0]?.getAttribute('rgb');
  assert.equal(fontRgb('E9'),'FFFFFFFF');assert.equal(fontRgb('D9'),'FF000000');

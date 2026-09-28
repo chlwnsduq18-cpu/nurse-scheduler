@@ -203,7 +203,7 @@
         const j=c-4,shift=person?.shifts[j],wanted=person?.wanted?.[j]===true;
         const explicitOff=wanted&&(shift==='O'||shift==='OFF');
         const blue=wanted&&!explicitOff;
-        const fill=j>=days?ordinaryFill:blue?wantedFill:explicitOff?ordinaryFill:isHoliday(j)?holidayFill:ordinaryFill;
+        const fill=j>=days?ordinaryFill:blue?wantedFill:(explicitOff||person?.manual?.[j]===true)?ordinaryFill:isHoliday(j)?holidayFill:ordinaryFill;
         styled(cellAt(r,c),{fillId:fill,fontColor:blue&&j<days?'FFFFFF':'000000'});
       }
       if(nurseSlots&&assistantSlots&&i===nurseSlots-1)for(let c=2;c<=widthEnd;c++)styled(cellAt(r,c),{borderBottom:'double'});

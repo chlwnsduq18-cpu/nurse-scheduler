@@ -115,3 +115,32 @@ test('impossible NK half target is reported without overwriting wanted OFF',()=>
  assert.ok(Object.values(c.analyzeMonth(result.plan)).flat().some(s=>s.includes('절반 분담 미충족')));
  for(let d=1;d<=30;d++)assert.equal(result.plan[`2026-09-${String(d).padStart(2,'0')}:1`],'O');
 });
+test('NK wanted OFF still reaches monthly halves by overlapping the other NK',()=>{
+ const c=setup();c.cursor=new Date(2026,9,1);c.getMonthDates=()=>Array.from({length:31},(_,i)=>new Date(2026,9,i+1));
+ c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={'2026-10':[1,2]};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
+ for(const day of [17,18,19])c.setWanted(`2026-10-${day}:1`,'O');
+ c.setWanted('2026-10-18:2','O');
+ const r=c.solveMonth(),balance=c.nkBalance(r.plan);assert.equal(balance.penalty,0);assert.deepEqual([...balance.counts].sort((a,b)=>a-b),[15,16]);
+ for(const day of [17,18,19])assert.equal(r.plan[`2026-10-${day}:1`],'O');
+ assert.ok(c.getMonthDates().some(d=>r.plan[c.keyFor(d,1)]==='N'&&r.plan[c.keyFor(d,2)]==='N'));
+});
+test('Saturday D includes HN and weekend nights require BOTH nurse and assistant',()=>{
+ const c=setup();c.state.staff=[{id:1,name:'HN',category:'HN'},{id:2,name:'RN',category:'RN'},{id:3,name:'AN',category:'AN'}];c.state.monthStaff={'2026-09':[1,2,3]};
+ const n=Date.UTC(2026,8,5)/86400000,demands=c.dayDemands(n),d=demands.find(d=>d.key==='D');
+ assert.deepEqual([...d.roles],['HN','RN']);assert.equal(d.min,2);assert.equal(c.dayAllowed(c.state.staff[0],n),true);
+ const plan={'2026-09-05:1':'D','2026-09-05:2':'N'};
+ assert.equal(c.countShift(plan,n,'N',['RN','NK']),1);assert.equal(c.countShift(plan,n,'N',['AN']),0);
+ assert.ok(c.analyzeMonth(plan)['2026-09-05'].some(s=>s.includes('N(AN) 1명 부족')));
+ plan['2026-09-05:3']='N';assert.ok(!c.analyzeMonth(plan)['2026-09-05'].some(s=>s.startsWith('N(')&&s.includes('부족')));
+});
+test('13-person generation staffs weekend nights in both groups and Saturday D with two nurses',()=>{
+ const c=setup(),roles=['HN',...Array(5).fill('RN'),'MD','NK','NK',...Array(4).fill('AN')];
+ c.state.staff=roles.map((category,i)=>({id:i+1,name:category+(i+1),category}));c.state.monthStaff={'2026-09':c.state.staff.map(s=>s.id)};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
+ const r=c.solveMonth();
+ for(const date of c.getMonthDates()){
+  const n=date.getTime()/86400000,kind=c.dayKind(n);if(kind==='weekday')continue;
+  assert.ok(c.countShift(r.plan,n,'N',['RN','NK'])>=1,'nurse night '+date.getDate());
+  assert.ok(c.countShift(r.plan,n,'N',['AN'])>=1,'assistant night '+date.getDate());
+  if(kind==='saturday')assert.ok(c.countShift(r.plan,n,'D',['HN','RN'])>=2,'Saturday D '+date.getDate());
+ }
+});

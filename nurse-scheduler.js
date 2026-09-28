@@ -36,7 +36,8 @@ if((state.schemaVersion||0)<11&&state.rosterSettings?.coverage){
   Object.assign(state.rosterSettings.coverage.saturday,{D:2,E:1,N:1,AN:1});
   Object.assign(state.rosterSettings.coverage.holiday,{D:1,E:1,N:1,AN:1});
 }
-state.schemaVersion=11;
+if((state.schemaVersion||0)<12&&state.rosterSettings?.weekend)state.rosterSettings.weekend.HN=true;
+state.schemaVersion=12;
 state.monthStaff=state.monthStaff||{};
 // Freeze existing months before membership is edited; preserve historical rosters.
 for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted)]){
@@ -347,6 +348,10 @@ function moveAssignmentToDate(e,dateKey){
   }
 }
 
+// Keep the provenance controls available even when an older HTML shell is cached.
+for(const [id,target] of [['assignmentWanted','assignmentShiftOptions'],['shiftWanted','shiftOptions']]){
+  if(!document.getElementById(id))document.getElementById(target)?.insertAdjacentHTML('beforebegin',`<label class="wanted-toggle"><input type="checkbox" id="${id}" checked> 원티드로 등록</label><p class="hint">체크 해제: 일반 수동 조정. 체크 후 근무 버튼을 누르면 저장됩니다.</p>`);
+}
 let assignmentShiftType="D";
 
 function openAssignmentModal(dateKey, staffId=null){
@@ -524,7 +529,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20260923-rules3',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260923-rules4',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }
@@ -539,6 +544,7 @@ exportExcel.onclick=async()=>{
   const options={year,month,spareRows:1,holidays:{...holidaysFor(year)},
     issues:Object.entries(analyzeMonth()),
     staff:activeStaff().map(st=>({id:st.id,name:st.name,category:st.category||'RN',
+      manual:dates.map(d=>hasManual(keyFor(d,st.id))),
       wanted:dates.map(d=>Object.hasOwn(state.wanted||{},keyFor(d,st.id))),
       shifts:dates.map(d=>{const k=keyFor(d,st.id);return displayShift(k,state.assignments[k]?(state.assignments[k+'_type']||'D'):'O');})}))};
   const label=exportExcel.textContent;
@@ -712,7 +718,7 @@ const HOLIDAYS_2026={
  '2026-09-24':'추석 연휴','2026-09-25':'추석','2026-09-26':'추석 연휴','2026-10-03':'개천절',
  '2026-10-05':'개천절 대체공휴일','2026-10-09':'한글날','2026-12-25':'성탄절'
 };
-const ROSTER_DEFAULTS={weekend:{HN:false,RN:true,MD:false,NK:true,AN:true},coverage:{
+const ROSTER_DEFAULTS={weekend:{HN:true,RN:true,MD:false,NK:true,AN:true},coverage:{
  weekday:{D:2,E:2,N:2,AD:1,AE:1,AN:0},saturday:{D:2,E:1,N:1,AD:1,AE:1,AN:1},holiday:{D:1,E:1,N:1,AD:1,AE:1,AN:1}}};
 function rosterSettings(){return state.rosterSettings||ROSTER_DEFAULTS}
 function holidaysFor(year){return state.holidayYears?.[year]?.dates||(year===2026?HOLIDAYS_2026:{})}
@@ -724,6 +730,7 @@ function displayShift(k,sh){return isVacation(k)?'휴가':sh}
 function dayAllowed(st,n){
  const role=st.category||'RN';
  if(role==='MD'&&isWeekend(n))return false;
+ if(role==='HN'&&new Date(n*DAY_MS).getUTCDay()===0)return false;
  if((role==='HN'||role==='MD')&&holidayName(n))return false;
  return !isWeekend(n)||rosterSettings().weekend[role]!==false;
 }
@@ -735,14 +742,14 @@ function allowedShifts(role){return role==='HN'?['D','O']:role==='MD'?['M','O']:
 function countShift(plan,n,sh,roles=null){return activeStaff(isoDay(n).slice(0,7)).filter(st=>(!roles||roles.includes(st.category||'RN'))&&plan[isoDay(n)+':'+st.id]===sh).length}
 function dayDemands(n,cfg=schedulerConfig()){
  const kind=dayKind(n),c=rosterSettings().coverage[kind];
- const night=Math.max(c.N,cfg.minimum.N);
+ const night=Math.max(c.N,cfg.minimum.N,kind==='weekday'?0:1);
  return [
- {key:'D',shift:'D',roles:kind==='weekday'?['HN','RN']:['RN'],min:Math.max(c.D,cfg.minimum.D),label:kind==='weekday'?'D(HN+RN)':'D(RN)'},
+ {key:'D',shift:'D',roles:kind!=='holiday'?['HN','RN']:['RN'],min:Math.max(c.D,cfg.minimum.D,kind==='saturday'?2:1),label:kind!=='holiday'?'D(HN+RN)':'D(RN)'},
  {key:'E',shift:'E',roles:['RN'],min:Math.max(c.E,cfg.minimum.E),label:'E(RN)'},
  ...(kind==='weekday'?[{key:'NK',shift:'N',roles:['NK'],min:Math.min(1,night),label:'N(NK)'},{key:'RN',shift:'N',roles:['RN'],min:Math.max(0,night-1),label:'N(RN)'}]:[{key:'NR',shift:'N',roles:['RN','NK'],min:night,label:'N(RN/NK)'}]),
  {key:'AD',shift:'D',roles:['AN'],min:c.AD,label:'D(AN)'},
  {key:'AE',shift:'E',roles:['AN'],min:c.AE,label:'E(AN)'},
- {key:'AN',shift:'N',roles:['AN'],min:c.AN,label:'N(AN)'},
+ {key:'AN',shift:'N',roles:['AN'],min:Math.max(c.AN,kind==='weekday'?0:1),label:'N(AN)'},
  midDemand(n,cfg)
  ];
 }
@@ -816,15 +823,15 @@ function canPlace(plan,n,st,sh,cfg){
  if(hasFixed(k)||work(plan[k])||!dayAllowed(st,n))return false;
  if(weeklyWorked(plan,n,st.id)>=weeklyWorkTarget(n,st.id,cfg))return false;
  const pool=role==='AN'?['AN']:['HN','RN','NK','MD'];
- if(countShift(plan,n,sh,pool)>=cfg.maximum[sh])return false;
- if(role==='RN'&&dayKind(n)!=='weekday'&&['D','E'].includes(sh)){
+ if(!(role==='NK'&&sh==='N')&&countShift(plan,n,sh,pool)>=cfg.maximum[sh])return false;
+ if(['HN','RN'].includes(role)&&dayKind(n)!=='weekday'&&['D','E'].includes(sh)){
    const demand=dayDemands(n,cfg).find(d=>d.shift===sh&&d.roles.includes(role));
    if(demand&&countShift(plan,n,sh,demand.roles)>=demand.min)return false;
  }
- if(role==='NK'&&sh==='N'&&getMonthDates().filter(d=>plan[keyFor(d,st.id)]==='N').length>=Math.ceil(getMonthDates().length/2))return false;
+ if(role==='NK'&&sh==='N'&&getMonthDates().filter(d=>plan[keyFor(d,st.id)]==='N').length>=(cfg.nkTargets?.[st.id]??Math.ceil(getMonthDates().length/2)))return false;
  if(sh==='N'){
    const demand=dayDemands(n,cfg).find(d=>d.shift==='N'&&d.roles.includes(role));
-   if(!demand||countShift(plan,n,'N',demand.roles)>=demand.min)return false;
+   if(!demand||(role!=='NK'&&countShift(plan,n,'N',demand.roles)>=demand.min))return false;
  }
  if(sh==='M'){
    const demand=midDemand(n,cfg);
@@ -861,9 +868,9 @@ function analyzeMonth(plan=currentPlan()){
    for(const d of dayDemands(n,cfg)){
      const count=countShift(plan,n,d.shift,d.roles);
      if(count<d.min)add(n,`${d.label} ${d.min-count}명 부족 · 원티드/규칙 확인`);
-     if(d.shift==='N'&&count>d.min)add(n,`${d.label} 정원 ${d.min}명 초과`);
+     // Night coverage is a minimum; overlapping NK shifts are explicitly allowed.
    }
-   for(const sh of ['D','E','N','M'])for(const pool of [['HN','RN','NK','MD'],['AN']])if(countShift(plan,n,sh,pool)>cfg.maximum[sh])add(n,`${pool[0]==='AN'?'AN':'간호사'} ${sh} 최대 인원 초과`);
+   for(const sh of ['D','E','N','M'])for(const pool of [['HN','RN','NK','MD'],['AN']])if(!(sh==='N'&&pool.includes('NK'))&&countShift(plan,n,sh,pool)>cfg.maximum[sh])add(n,`${pool[0]==='AN'?'AN':'간호사'} ${sh} 최대 인원 초과`);
    for(const st of activeStaff()){
      const k=isoDay(n)+':'+st.id,sh=plan[k],role=st.category||'RN';
      for(const e of staffProblems(plan,n,st,sh,cfg))add(n,`${st.name}: ${e}${hasFixed(k)?' (사용자 지정 유지)':''}`);
@@ -922,8 +929,54 @@ function addNightBlock(plan,st,a,len,cfg,start,end){
    trial[k]='N';added++;
  }
  if(!added)return null;
+ if(st.category!=='NK'){
+   const last=nightRun(trial,a,st.id).b;
+   for(let d=last+1;d<=Math.min(end,last+2);d++){
+     let offs=0;for(let w=weekStart(d);w<weekStart(d)+7;w++)if(fixedShift(isoDay(w)+':'+st.id)==='O')offs++;
+     if(offs>=2&&fixedShift(isoDay(d)+':'+st.id)!=='O'&&dayAllowed(st,d))return null;
+   }
+ }
  for(let n=a;n<a+len;n++)if(staffProblems(trial,n,st,'N',cfg).length)return null;
  return trial;
+}
+// Rebuild one NK independently when alternating blocks cannot meet its target.
+// Other NK assignments only affect preference, never eligibility on that date.
+function repairNkHalf(plan,st,target,cfg,dates,variant=0){
+ const start=dates[0],end=dates.at(-1),id=st.id,base={...plan};
+ for(const n of dates){const k=isoDay(n)+':'+id;if(!hasFixed(k))delete base[k]}
+ const prior=nightRun(base,start-1,id);
+ let initialRun=base[isoDay(start-1)+':'+id]==='N'?prior.length:0,initialOff=0;
+ if(!initialRun)for(let n=start-1;n>=start-4&&!work(base[isoDay(n)+':'+id]);n--)initialOff++;
+ let states=[{plan:base,count:0,run:initialRun,off:initialOff,lastRun:0,cost:0}];
+ for(let i=0;i<dates.length;i++){
+   const n=dates[i],k=isoDay(n)+':'+id,fixed=fixedShift(k),candidates=new Map();
+   for(const prev of states)for(const sh of fixed!==undefined?[fixed]:['N','O']){
+     if(sh==='N'&&prev.count>=target&&fixed===undefined)continue;
+     if(sh!=='N'&&prev.run===1&&!hasFixed(isoDay(n-1)+':'+id))continue;
+     const trial={...prev.plan,[k]:sh};
+     if(sh==='N'&&fixed===undefined&&(!dayAllowed(st,n)||staffProblems(trial,n,st,'N',cfg).length))continue;
+     const count=prev.count+(sh==='N'?1:0),run=sh==='N'?prev.run+1:0,off=sh==='N'?0:prev.off+1;
+     let cost=prev.cost;
+     if(sh==='N'){
+       if(!prev.run&&prev.lastRun)cost+=Math.abs(prev.off-prev.lastRun)*3;
+       const demand=dayDemands(n,cfg).find(d=>d.shift==='N'&&d.roles.includes('NK'));
+       if(demand&&countShift(plan,n,'N',demand.roles)>=demand.min)cost+=1;
+       cost+=((i+variant)%5)*0.01;
+     }
+     const next={plan:trial,count,run,off,lastRun:prev.run||prev.lastRun,cost};
+     const key=[count,run,Math.min(off,4),next.lastRun,weeklyWorked(trial,n,id)].join(':');
+     if(!candidates.has(key)||candidates.get(key).cost>cost)candidates.set(key,next);
+   }
+   states=[...candidates.values()].sort((a,b)=>(Math.abs(a.count-target*(i+1)/dates.length)*4+a.cost)-(Math.abs(b.count-target*(i+1)/dates.length)*4+b.cost)).slice(0,160);
+   if(!states.length)return plan;
+ }
+ const valid=states.filter(s=>dates.every(n=>{
+   const k=isoDay(n)+':'+id;if(hasFixed(k)||s.plan[k]!=='N')return true;
+   return !staffProblems(s.plan,n,st,'N',cfg).length&&nightRun(s.plan,n,id).length>=2;
+ }));
+ valid.sort((a,b)=>(Math.abs(target-a.count)*100000+a.cost)-(Math.abs(target-b.count)*100000+b.cost));
+ const best=valid[0],current=dates.filter(n=>plan[isoDay(n)+':'+id]==='N').length;
+ return best&&Math.abs(target-best.count)<Math.abs(target-current)?best.plan:plan;
 }
 // Repair surplus D/E/M placements without disturbing night blocks or daily coverage.
 function repairDayTargets(plan,cfg,dates){
@@ -953,16 +1006,25 @@ function repairDayTargets(plan,cfg,dates){
 }
 function solveMonth(){
  const cfg=schedulerConfig(),dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),start=dates[0],end=dates.at(-1),month=isoDay(start).slice(0,7);
+ const priorityDates=[...dates].sort((a,b)=>(dayKind(a)==='saturday'?0:dayKind(a)==='holiday'?1:2)-(dayKind(b)==='saturday'?0:dayKind(b)==='holiday'?1:2)||a-b);
  const current=currentPlan(),baseline={},fixed={};
  for(const [k,v]of Object.entries(current))if(!k.startsWith(month+'-'))fixed[k]=v;
  for(const [k,v]of Object.entries({...state.manual,...state.wanted}))if(activeStaff(k.slice(0,7)).some(st=>st.id===Number(k.split(':')[1])))fixed[k]=v;
  for(const n of dates)for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;baseline[k]=state.generationSnapshot?.month===month?state.generationSnapshot.shifts[k]??current[k]:current[k]}
- const nk=activeStaff().filter(s=>s.category==='NK');let best=null;
+ const nk=activeStaff().filter(s=>s.category==='NK'),nkCache=new Map();let best=null;
  for(let attempt=0;attempt<36;attempt++){
    let plan={...fixed},seed=731+attempt*7919;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296};
+   cfg.nkTargets=Object.fromEntries(nk.map((st,i)=>[st.id,(i+attempt)%2?Math.ceil(dates.length/2):Math.floor(dates.length/2)]));
    if(nk.length===2){let n=start;for(const block of nkTemplate(dates.length,attempt)){
      const trial=addNightBlock(plan,nk[block.who],n,block.len,cfg,start,end);if(trial)plan=trial;n+=block.len;
    }}
+   const cacheKey=attempt%6;
+   if(nkCache.has(cacheKey))Object.assign(plan,nkCache.get(cacheKey));
+   else{
+     for(const st of nk)plan=repairNkHalf(plan,st,cfg.nkTargets[st.id],cfg,dates,attempt);
+     const shifts={};for(const st of nk)for(const n of dates){const k=isoDay(n)+':'+st.id;if(plan[k]!==undefined)shifts[k]=plan[k]}
+     nkCache.set(cacheKey,shifts);
+   }
    // Keep previous valid night blocks first on one third of attempts.
    if(attempt%3===0)for(const st of activeStaff())for(const n of dates){
      if(baseline[isoDay(n)+':'+st.id]!=='N'||baseline[isoDay(n-1)+':'+st.id]==='N')continue;
@@ -996,9 +1058,9 @@ function solveMonth(){
      }
    }
    // HN and MD planned work, then preserve feasible existing day/evening shifts.
-   for(const st of activeStaff().filter(s=>['HN','MD'].includes(s.category)))for(const n of dates){const sh=st.category==='HN'?'D':'M';if(canPlace(plan,n,st,sh,cfg))plan[isoDay(n)+':'+st.id]=sh}
+   for(const st of activeStaff().filter(s=>['HN','MD'].includes(s.category)))for(const n of priorityDates){const sh=st.category==='HN'?'D':'M';if(canPlace(plan,n,st,sh,cfg))plan[isoDay(n)+':'+st.id]=sh}
    if(attempt%3===0)for(const n of dates)for(const st of activeStaff()){const k=isoDay(n)+':'+st.id,sh=baseline[k];if(work(sh)&&sh!=='N'&&canPlace(plan,n,st,sh,cfg))plan[k]=sh}
-   for(const n of dates)for(const d of dayDemands(n,cfg).filter(d=>d.shift!=='N').sort((a,b)=>Number(b.shift==='M')-Number(a.shift==='M'))){
+   for(const n of priorityDates)for(const d of dayDemands(n,cfg).filter(d=>d.shift!=='N').sort((a,b)=>Number(b.shift==='M')-Number(a.shift==='M'))){
      while(countShift(plan,n,d.shift,d.roles)<d.min){
        const options=activeStaff().filter(st=>d.roles.includes(st.category||'RN')&&canPlace(plan,n,st,d.shift,cfg)).map(st=>{
          const k=isoDay(n)+':'+st.id,prev=plan[isoDay(n-1)+':'+st.id];
@@ -1018,7 +1080,8 @@ function solveMonth(){
    repairDayTargets(plan,cfg,dates);
    let missing=0,changes=0;
    for(const n of dates){for(const d of dayDemands(n,cfg))missing+=Math.max(0,d.min-countShift(plan,n,d.shift,d.roles));for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;plan[k]??='O';if(baseline[k]!==undefined&&baseline[k]!==plan[k])changes++}}
-   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[balance,missing,unfilled,nkRestPreference(plan,dates),unwantedAdjacentOff(plan,dates),changes];
+   const criticalMissing=dates.filter(n=>dayKind(n)!=='weekday').reduce((sum,n)=>sum+dayDemands(n,cfg).filter(d=>['D','E','NR','AN'].includes(d.key)).reduce((s,d)=>s+Math.max(0,d.min-countShift(plan,n,d.shift,d.roles)),0),0);
+   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[balance,criticalMissing,unfilled,unwantedAdjacentOff(plan,dates),missing,nkRestPreference(plan,dates),changes];
    const better=!best||score.some((v,i)=>v<best.score[i]&&score.slice(0,i).every((x,j)=>x===best.score[j]));
    if(better)best={plan,missing,changes,unfilled,month,score};
    if(score.every(v=>v===0))break;
