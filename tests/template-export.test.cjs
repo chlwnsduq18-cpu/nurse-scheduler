@@ -91,7 +91,7 @@ test('export button captures month, loads relative template, restores button and
   document:{baseURI:'http://localhost:8080/nurse-scheduler/index.html',head:{appendChild(){}},body:{appendChild(){}},createElement(){return {click(){urls.push(this.download)},remove(){}}}},
   exportExcel:button,JSZip,NurseSchedulerExcel:{async build(bytes,options){exported.push(options);return {bytes:new Uint8Array([80,75]),mimeType:'test',filename:'test.xlsx'}}},
   cursor:new Date(2026,8,1),getMonthDates:()=>[new Date(2026,8,1)],holidaysFor:()=>({'2026-09-24':'추석'}),analyzeMonth:()=>({}),
-  hasManual:()=>false,activeStaff:()=>fake.state.staff,state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
+  monthlyOffLimit:()=>9,hasManual:()=>false,activeStaff:()=>fake.state.staff,state:{wanted:{test:'N'},staff:[{id:1,name:'테스트',category:'RN'}],assignments:{'test':1,'test_type':'N'}},keyFor:()=> 'test',displayShift:(k,sh)=>sh,
   alert:m=>alerts.push(m),async fetch(path){requests.push(String(path));fake.cursor=new Date(2026,9,1);return {ok:!fail,status:404,arrayBuffer:async()=>new Uint8Array([80,75]).buffer}}
  };fake.globalThis=fake;vm.runInNewContext(code,fake);await button.onclick();
  assert.equal(exported[0].staff[0].wanted[0],true);assert.equal(exported[0].month,9);assert.equal(exported[0].staff[0].shifts[0],'N');assert.equal(requests[0],'http://localhost:8080/nurse-scheduler/nurse_scheduler_template.xlsx');assert.equal(urls.length,1);assert.equal(button.disabled,false);

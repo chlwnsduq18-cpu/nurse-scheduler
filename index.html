@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>소형 병원 간호사 스케줄러</title>
-<link rel="stylesheet" href="./nurse-scheduler.css?v=20260923-rules4">
+<link rel="stylesheet" href="./nurse-scheduler.css?v=20260929-rest-off">
 </head>
 <body>
 <div class="app">
 <header class="top">
-  <div class="brand"><h1>간호사 스케줄러</h1><span>소형 병원용 · Browser Local Scheduler · rules4</span></div>
+  <div class="brand"><h1>간호사 스케줄러</h1><span>소형 병원용 · Browser Local Scheduler · rest-off</span></div>
   <div class="month"><button id="prev">‹</button><h2 id="monthTitle"></h2><button id="next">›</button></div>
 </header>
 <div class="layout">
@@ -85,6 +85,8 @@
         <p class="hint"><a href="https://www.law.go.kr/법령/근로기준법/제50조" target="_blank" rel="noopener">근로기준법 제50조</a> · <a href="https://www.law.go.kr/법령/근로기준법/제54조" target="_blank" rel="noopener">제54조</a> · <a href="https://www.law.go.kr/법령/근로기준법/제55조" target="_blank" rel="noopener">제55조</a></p>
       </details>
       <details class="basic-settings" open><summary>직군·요일별 추가 편성 규칙</summary>
+        <label class="month-off-setting">이번 달 기준 OFF <input id="monthlyOffLimit" type="number" min="0" max="31" step="1"> 일</label>
+        <p class="hint">기본값은 9일이며 병원의 해당 월 기준으로 수정하세요. 원티드·수동 지정 OFF도 포함합니다. 휴가는 별도로 계산하며 NK는 월 절반 근무 기준을 적용합니다. N 묶음 앞뒤에는 다른 근무를 바로 배정하지 않습니다.</p>
         <div id="weekendSettings" class="weekend-settings"></div>
         <p class="hint">HN은 D만, 공휴일 OFF. MD는 M만, 주말·공휴일 OFF(고정). RN은 주말 M 불가, AN은 주말 M 담당입니다. 공휴일은 토요일보다 우선하며 일요일과 같은 필요 인원을 적용합니다.</p>
         <div id="coverageSettings"></div>
@@ -178,6 +180,6 @@
   <div id="monthStaffChoices"></div>
   <div class="month-staff-actions"><button id="cancelMonthStaff" type="button" class="ghost">취소</button><button id="saveMonthStaff" type="button" class="primary">저장</button></div>
 </dialog>
-<script src="./nurse-scheduler.js?v=20260923-rules4"></script>
+<script src="./nurse-scheduler.js?v=20260929-rest-off"></script>
 </body>
 </html>

@@ -37,7 +37,8 @@ if((state.schemaVersion||0)<11&&state.rosterSettings?.coverage){
   Object.assign(state.rosterSettings.coverage.holiday,{D:1,E:1,N:1,AN:1});
 }
 if((state.schemaVersion||0)<12&&state.rosterSettings?.weekend)state.rosterSettings.weekend.HN=true;
-state.schemaVersion=12;
+state.schemaVersion=13;
+state.monthOffLimits=state.monthOffLimits||{};
 state.monthStaff=state.monthStaff||{};
 // Freeze existing months before membership is edited; preserve historical rosters.
 for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted)]){
@@ -287,15 +288,16 @@ function renderScheduleTable(){
   html+='<th class="total-col">월 합계</th></tr></thead><tbody>';
 
   activeStaff().forEach(st=>{
-    const counts={D:0,E:0,N:0,M:0,O:0};
+    const counts={D:0,E:0,N:0,M:0,O:0,V:0};
     html+=`<tr><th class="staff-col" title="${esc(st.name)}">${esc(st.name)}</th><td class="category-col">${esc(st.category||"RN")}</td>`;
     dates.forEach(d=>{
       const sh=getAssignmentShift(d,st.id);
-      counts[sh]=(counts[sh]||0)+1;
+      const countCode=isVacation(keyFor(d,st.id))?'V':sh;
+      counts[countCode]=(counts[countCode]||0)+1;
       const dk=`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
       html+=`<td class="shift-cell${issues[dk]?' needs-review':''}" data-date="${dk}" data-staff-id="${st.id}" title="${esc(st.name)} · ${dk} · ${sh} ${esc((issues[dk]||[]).join(' / '))}"><span class="table-shift shift-${isVacation(keyFor(d,st.id))?'V':sh}">${displayShift(keyFor(d,st.id),sh)}${hasWanted(keyFor(d,st.id))?'<small class="wanted-mark" title="사용자 지정">🔒</small>':""}</span></td>`;
     });
-    html+=`<td class="total-col">D${counts.D} · E${counts.E} · N${counts.N} · M${counts.M} · O${counts.O}</td></tr>`;
+    html+=`<td class="total-col">D${counts.D} · E${counts.E} · N${counts.N} · M${counts.M} · O${counts.O} · 휴가${counts.V}</td></tr>`;
   });
   html+='</tbody>';
   scheduleTable.innerHTML=html;
@@ -501,6 +503,7 @@ saveRules.onclick=()=>{
     alert('규칙 값은 0 이상의 정수로 입력해주세요.');return;
   }
   state.shiftTimes=shiftTimes;state.shiftTimesConfirmed=confirmShiftTimes.checked;
+  state.monthOffLimits={...state.monthOffLimits,[rosterMonth()]:rosterDraft.offLimit};
   state.rosterSettings=rosterDraft.settings;state.holidayYears[cursor.getFullYear()]=rosterDraft.calendar;
   state.rules=rows.map(row=>{
     const type=row.querySelector(".rule-type").value;
@@ -529,7 +532,7 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20260923-rules4',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20260929-rest-off',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }
@@ -541,7 +544,7 @@ exportExcel.onclick=async()=>{
   }
   // Capture the visible month before any asynchronous work so navigation cannot mix months.
   const dates=getMonthDates(),year=cursor.getFullYear(),month=cursor.getMonth()+1;
-  const options={year,month,spareRows:1,holidays:{...holidaysFor(year)},
+  const options={year,month,spareRows:1,baseOff:monthlyOffLimit(),holidays:{...holidaysFor(year)},
     issues:Object.entries(analyzeMonth()),
     staff:activeStaff().map(st=>({id:st.id,name:st.name,category:st.category||'RN',
       manual:dates.map(d=>hasManual(keyFor(d,st.id))),
@@ -753,6 +756,37 @@ function dayDemands(n,cfg=schedulerConfig()){
  midDemand(n,cfg)
  ];
 }
+function monthlyOffLimit(){
+ const value=state.monthOffLimits?.[rosterMonth()];
+ return Number.isInteger(value)?value:9;
+}
+function monthlyWorkTarget(st){
+ const dates=getMonthDates();
+ if(st.category==='NK')return Math.floor(dates.length/2);
+ const vacation=dates.filter(d=>isVacation(keyFor(d,st.id))).length;
+ return Math.max(0,dates.length-monthlyOffLimit()-vacation);
+}
+function monthlyWorked(plan,id){return getMonthDates().filter(d=>work(plan[keyFor(d,id)])).length}
+// Upper bound before committing night blocks: include forced OFF and weekly caps.
+function possibleMonthWork(plan,st,cfg){
+ const dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),set=new Set(dates),blocked=new Set();
+ for(const n of dates)if(!dayAllowed(st,n)||fixedShift(isoDay(n)+':'+st.id)==='O')blocked.add(n);
+ for(let n=dates[0]-3;n<=dates.at(-1)+1;n++){
+   if(plan[isoDay(n)+':'+st.id]!=='N')continue;
+   if(plan[isoDay(n-1)+':'+st.id]!=='N')blocked.add(n-1);
+   if(plan[isoDay(n+1)+':'+st.id]!=='N')for(let i=1;i<=Math.max(cfg.nightRest,['RN','NK','AN'].includes(st.category)?2:1);i++)blocked.add(n+i);
+ }
+ let total=0;
+ for(const monday of new Set(dates.map(weekStart))){
+   let available=0,outside=0;
+   for(let n=monday;n<monday+7;n++){
+     if(set.has(n)){if(!blocked.has(n))available++;}
+     else if(work(plan[isoDay(n)+':'+st.id]))outside++;
+   }
+   total+=Math.min(available,Math.max(0,cfg.maxWeekly-outside));
+ }
+ return total;
+}
 function weeklyWorkTarget(n,id,cfg){
  const st=state.staff.find(s=>s.id===id);let available=0;
  for(let d=weekStart(n);d<weekStart(n)+7;d++){
@@ -813,6 +847,7 @@ function staffProblems(plan,n,st,sh,cfg){
    const lt=shiftTiming(left),rt=shiftTiming(right);
    if(lt&&rt&&delta*1440+rt.start-lt.end<cfg.minRestHours*60)errors.push('근무 사이 11시간 휴식 부족');
    const protectedNight=role==='RN'||role==='NK'||(role==='AN'&&(isWeekend(leftDay)||holidayName(leftDay)));
+   if(delta===1&&((left==='N'&&right!=='N')||(left!=='N'&&right==='N')))errors.push('N 묶음 앞뒤 다른 근무 사이에 OFF 필요');
    if(left==='N'&&!(right==='N'&&delta===1)&&delta-1<Math.max(cfg.nightRest,protectedNight?2:0))errors.push('N 종료 후 최소 2일 OFF 부족');
    break;
  }
@@ -822,12 +857,9 @@ function canPlace(plan,n,st,sh,cfg){
  const k=isoDay(n)+':'+st.id,role=st.category||'RN';
  if(hasFixed(k)||work(plan[k])||!dayAllowed(st,n))return false;
  if(weeklyWorked(plan,n,st.id)>=weeklyWorkTarget(n,st.id,cfg))return false;
+ if(role!=='NK'&&monthlyWorked(plan,st.id)>=monthlyWorkTarget(st))return false;
  const pool=role==='AN'?['AN']:['HN','RN','NK','MD'];
  if(!(role==='NK'&&sh==='N')&&countShift(plan,n,sh,pool)>=cfg.maximum[sh])return false;
- if(['HN','RN'].includes(role)&&dayKind(n)!=='weekday'&&['D','E'].includes(sh)){
-   const demand=dayDemands(n,cfg).find(d=>d.shift===sh&&d.roles.includes(role));
-   if(demand&&countShift(plan,n,sh,demand.roles)>=demand.min)return false;
- }
  if(role==='NK'&&sh==='N'&&getMonthDates().filter(d=>plan[keyFor(d,st.id)]==='N').length>=(cfg.nkTargets?.[st.id]??Math.ceil(getMonthDates().length/2)))return false;
  if(sh==='N'){
    const demand=dayDemands(n,cfg).find(d=>d.shift==='N'&&d.roles.includes(role));
@@ -841,17 +873,11 @@ function canPlace(plan,n,st,sh,cfg){
  return staffProblems(plan,n,st,sh,cfg).length===0;
 }
 function workTargetGaps(plan,cfg=schedulerConfig()){
- const dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),inMonth=new Set(dates),gaps=[];
- for(const monday of [...new Set(dates.map(weekStart))])for(const st of activeStaff()){
-   if(st.category==='NK')continue; // NK has a monthly half-roster target, not five days every week.
-   let actual=0,eligible=0,outside=0;
-   for(let d=monday;d<monday+7;d++){
-     const k=isoDay(d)+':'+st.id;
-     if(inMonth.has(d)){if(work(plan[k]))actual++;if(dayAllowed(st,d)&&fixedShift(k)!=='O')eligible++}
-     else if(work(plan[k]))outside++;
-   }
-   const target=Math.min(eligible,Math.max(0,weeklyWorkTarget(monday,st.id,cfg)-outside));
-   if(actual<target)gaps.push({name:st.name,id:st.id,monday,target,actual,missing:target-actual,freeDates:dates.filter(d=>weekStart(d)===monday&&dayAllowed(st,d)&&!hasFixed(isoDay(d)+':'+st.id)&&!work(plan[isoDay(d)+':'+st.id]))});
+ const dates=getMonthDates().map(d=>dayNumber(keyFor(d,0).split(':')[0])),gaps=[];
+ for(const st of activeStaff()){
+   if(st.category==='NK')continue;
+   const target=monthlyWorkTarget(st),actual=monthlyWorked(plan,st.id);
+   if(actual<target)gaps.push({name:st.name,id:st.id,monday:weekStart(dates[0]),target,actual,missing:target-actual,freeDates:dates.filter(d=>dayAllowed(st,d)&&!hasFixed(isoDay(d)+':'+st.id)&&!work(plan[isoDay(d)+':'+st.id]))});
  }
  return gaps;
 }
@@ -890,7 +916,7 @@ function analyzeMonth(plan=currentPlan()){
      }
    }
  }
- for(const g of workTargetGaps(plan,cfg))for(const n of (g.freeDates.length?g.freeDates:[Math.max(start,g.monday)]))add(n,`${g.name}: 주간 목표 ${g.target}일 중 ${g.actual}일 · ${g.missing}일 추가 편성 필요`);
+ for(const g of workTargetGaps(plan,cfg))for(const n of (g.freeDates.length?g.freeDates:[Math.max(start,g.monday)]))add(n,`${g.name}: 월 기준 OFF ${monthlyOffLimit()}일보다 ${g.missing}일 초과 · 근무 ${g.actual}/${g.target}일 · 입력 OFF·N 전후 휴식·주간 상한·직군 조건 확인`);
  const balance=nkBalance(plan);
  if(balance.nk.length!==2)add(start,`NK ${balance.nk.length}명 등록됨 · 기본 교대는 NK 2명 기준`);
  if(balance.penalty)add(start,`NK 월간 절반 분담 미충족: ${balance.nk.map((s,i)=>s.name+' '+balance.counts[i]+'일').join(', ')}`);
@@ -929,9 +955,10 @@ function addNightBlock(plan,st,a,len,cfg,start,end){
    trial[k]='N';added++;
  }
  if(!added)return null;
+ if(st.category!=='NK'&&possibleMonthWork(trial,st,cfg)<Math.min(monthlyWorkTarget(st),possibleMonthWork(plan,st,cfg)))return null;
  if(st.category!=='NK'){
-   const last=nightRun(trial,a,st.id).b;
-   for(let d=last+1;d<=Math.min(end,last+2);d++){
+   const block=nightRun(trial,a,st.id),last=block.b;
+   for(const d of [block.a-1,last+1,last+2].filter(d=>d>=start&&d<=end)){
      let offs=0;for(let w=weekStart(d);w<weekStart(d)+7;w++)if(fixedShift(isoDay(w)+':'+st.id)==='O')offs++;
      if(offs>=2&&fixedShift(isoDay(d)+':'+st.id)!=='O'&&dayAllowed(st,d))return null;
    }
@@ -1081,7 +1108,7 @@ function solveMonth(){
    let missing=0,changes=0;
    for(const n of dates){for(const d of dayDemands(n,cfg))missing+=Math.max(0,d.min-countShift(plan,n,d.shift,d.roles));for(const st of activeStaff()){const k=isoDay(n)+':'+st.id;plan[k]??='O';if(baseline[k]!==undefined&&baseline[k]!==plan[k])changes++}}
    const criticalMissing=dates.filter(n=>dayKind(n)!=='weekday').reduce((sum,n)=>sum+dayDemands(n,cfg).filter(d=>['D','E','NR','AN'].includes(d.key)).reduce((s,d)=>s+Math.max(0,d.min-countShift(plan,n,d.shift,d.roles)),0),0);
-   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[balance,criticalMissing,unfilled,unwantedAdjacentOff(plan,dates),missing,nkRestPreference(plan,dates),changes];
+   const unfilled=workTargetGaps(plan,cfg).reduce((s,g)=>s+g.missing,0),balance=nkBalance(plan).penalty,score=[balance,unfilled,criticalMissing,unwantedAdjacentOff(plan,dates),missing,nkRestPreference(plan,dates),changes];
    const better=!best||score.some((v,i)=>v<best.score[i]&&score.slice(0,i).every((x,j)=>x===best.score[j]));
    if(better)best={plan,missing,changes,unfilled,month,score};
    if(score.every(v=>v===0))break;
@@ -1089,6 +1116,7 @@ function solveMonth(){
  return best;
 }
 function renderRosterSettings(){
+ document.getElementById('monthlyOffLimit').value=monthlyOffLimit();
  const settings=rosterSettings();
  weekendSettings.innerHTML=['HN','RN','MD','NK','AN'].map(role=>`<label><input type="checkbox" data-role="${role}" ${role!=='MD'&&settings.weekend[role]?'checked':''} ${role==='MD'?'disabled':''}> ${role} ${role==='MD'?'주말 OFF (고정)':'주말 근무 가능'}</label>`).join('');
  coverageSettings.innerHTML='<table class="coverage-editor"><thead><tr><th>날짜</th><th>D 간호사</th><th>E RN</th><th>N 총원</th><th>D AN</th><th>E AN</th><th>N AN</th></tr></thead><tbody>'+Object.entries(settings.coverage).map(([kind,row])=>`<tr><th>${{weekday:'평일',saturday:'토요일',holiday:'일요일·공휴일'}[kind]}</th>${['D','E','N','AD','AE','AN'].map(key=>`<td><input type="number" min="0" max="30" step="1" data-kind="${kind}" data-field="${key}" value="${row[key]}" aria-label="${kind} ${key}"></td>`).join('')}</tr>`).join('')+'</tbody></table>';
@@ -1097,6 +1125,8 @@ function renderRosterSettings(){
  confirmHolidayYear.checked=state.holidayYears?.[year]?!!state.holidayYears[year].confirmed:year===2026;
 }
 function readRosterSettings(){
+ const offLimit=Number(document.getElementById('monthlyOffLimit').value);
+ if(!Number.isInteger(offLimit)||offLimit<0||offLimit>getMonthDates().length)throw Error('월 기준 OFF는 0부터 해당 월 일수까지의 정수로 입력해주세요.');
  const settings=JSON.parse(JSON.stringify(ROSTER_DEFAULTS));
  for(const el of weekendSettings.querySelectorAll('input'))settings.weekend[el.dataset.role]=el.dataset.role==='MD'?false:el.checked;
  for(const el of coverageSettings.querySelectorAll('input')){
@@ -1109,7 +1139,7 @@ function readRosterSettings(){
    if(!match||!match[1].startsWith(year+'-')||!Number.isFinite(dayNumber(match[1]))||isoDay(dayNumber(match[1]))!==match[1])throw Error('공휴일은 해당 연도의 YYYY-MM-DD 이름 형식으로 입력해주세요.');
    dates[match[1]]=match[2]||'공휴일';
  }
- return {settings,calendar:{dates,confirmed:confirmHolidayYear.checked}};
+ return {settings,offLimit,calendar:{dates,confirmed:confirmHolidayYear.checked}};
 }
 
 function generateMonth(){
@@ -1124,7 +1154,7 @@ function generateMonth(){
   try{localStorage.setItem(KEY,JSON.stringify(next))}catch(error){alert('저장 공간 또는 권한 문제로 생성 결과를 저장하지 못했습니다. 기존 근무표와 스냅샷을 유지합니다.');return false}
   state=next;render();
   const count=Object.keys(analyzeMonth()).length;
-  alert(`자동 생성 완료 · 이전 결과 대비 ${result.changes}칸 변경\n개인별 근무 목표 미충족: ${result.unfilled}일\n${count?`확인 필요한 날짜 ${count}일을 옅은 붉은색으로 표시했습니다.\n원티드 직접 배정 또는 조건 조정 후 다시 생성해주세요. 사용자 지정도 위반 사유는 표시됩니다.`:'기본 편성 검사에서 부족·초과가 발견되지 않았습니다.'}\n최신 스냅샷 1개를 저장했습니다. 실제 근무·휴게시간, 주휴·야간근로 조건은 별도 확인이 필요합니다.`);
+  alert(`${count?'조건 미충족 편성 결과':'자동 생성 완료'} · 이전 결과 대비 ${result.changes}칸 변경\n월 OFF 기준 초과 합계: ${result.unfilled}일\n${count?`확인 필요한 날짜 ${count}일을 옅은 붉은색으로 표시했습니다.\n원티드 직접 배정 또는 조건 조정 후 다시 생성해주세요. 사용자 지정도 위반 사유는 표시됩니다.`:'기본 편성 검사에서 부족·초과가 발견되지 않았습니다.'}\n최신 스냅샷 1개를 저장했습니다. 실제 근무·휴게시간, 주휴·야간근로 조건은 별도 확인이 필요합니다.`);
   return true;
 }
 autoGenerate.onclick=()=>{

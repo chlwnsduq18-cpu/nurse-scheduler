@@ -8,6 +8,7 @@ function setup(){
  vm.createContext(c);vm.runInContext(src.slice(src.indexOf('function putAssignment'),src.indexOf('function removeRelated')),c);vm.runInContext(src.slice(src.indexOf('function rosterMonth'),src.indexOf('function openMonthStaff')),c);
  vm.runInContext(src.slice(src.indexOf('const DAY_MS='),src.indexOf('function renderRosterSettings')),c);
  vm.runInContext(src.slice(src.indexOf('function generateMonth'),src.indexOf('autoGenerate.onclick')),c);
+ c.isoDay=vm.runInContext("isoDay",c);c.work=vm.runInContext("work",c);
  return c;
 }
 test('monthly membership is independent, inherited once, and follows global order',()=>{
@@ -62,7 +63,7 @@ test('weekend and public holiday demand uses RN or NK plus separate AN',()=>{
   assert.equal(demands.find(d=>d.key==='D').min,date==='2026-09-05'?2:1);assert.equal(demands.find(d=>d.key==='E').min,1);
  }
  const n=Date.UTC(2026,8,6)/86400000,plan={'2026-09-06:1':'D'};
- assert.equal(c.canPlace(plan,n,c.state.staff[1],'D',cfg),false);
+ assert.equal(c.canPlace(plan,n,c.state.staff[1],'D',cfg),true);
 });
 test('NK exact half targets and equal-length N/rest preference',()=>{
  const c=setup();c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={'2026-09':[1,2]};c.state.assignments={};c.state.wanted={};
@@ -137,10 +138,40 @@ test('13-person generation staffs weekend nights in both groups and Saturday D w
  const c=setup(),roles=['HN',...Array(5).fill('RN'),'MD','NK','NK',...Array(4).fill('AN')];
  c.state.staff=roles.map((category,i)=>({id:i+1,name:category+(i+1),category}));c.state.monthStaff={'2026-09':c.state.staff.map(s=>s.id)};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
  const r=c.solveMonth();
+ for(const st of c.state.staff){
+  assert.equal(c.monthlyWorked(r.plan,st.id),st.category==='NK'?15:st.category==='MD'?20:21,st.name+' monthly target');
+  for(const date of c.getMonthDates()){
+   const n=date.getTime()/86400000,a=r.plan[c.isoDay(n)+':'+st.id],b=r.plan[c.isoDay(n+1)+':'+st.id];
+   assert.ok(!(c.work(a)&&c.work(b)&&((a==='N')!==(b==='N'))),st.name+' adjacent N');
+  }
+ }
+ assert.ok(Object.values(c.analyzeMonth(r.plan)).flat().some(s=>s.includes('MD7: 월 기준 OFF 9일보다 1일 초과')));
  for(const date of c.getMonthDates()){
   const n=date.getTime()/86400000,kind=c.dayKind(n);if(kind==='weekday')continue;
   assert.ok(c.countShift(r.plan,n,'N',['RN','NK'])>=1,'nurse night '+date.getDate());
   assert.ok(c.countShift(r.plan,n,'N',['AN'])>=1,'assistant night '+date.getDate());
   if(kind==='saturday')assert.ok(c.countShift(r.plan,n,'D',['HN','RN'])>=2,'Saturday D '+date.getDate());
  }
+});
+test('night blocks cannot touch other shifts in either direction, including month boundaries',()=>{
+ const c=setup(),st=c.state.staff[0],cfg=c.schedulerConfig(),n=Date.UTC(2026,8,1)/86400000;
+ for(const other of ['D','E','M'])for(const delta of [-1,1]){
+  const plan={[c.isoDay(n+delta)+':1']:other};
+  assert.ok(c.staffProblems(plan,n,st,'N',cfg).some(s=>s.includes('N 묶음 앞뒤')));
+  const reverse={[c.isoDay(n+delta)+':1']:'N'};
+  assert.ok(c.staffProblems(reverse,n,st,other,cfg).some(s=>s.includes('N 묶음 앞뒤')));
+ }
+ assert.ok(!c.staffProblems({'2026-08-30:1':'E'},n,st,'N',cfg).some(s=>s.includes('N 묶음 앞뒤')));
+});
+test('monthly OFF limit counts fixed OFF but excludes vacation and preserves conflicting input',()=>{
+ const c=setup(),st=c.state.staff[0];c.state.assignments={};c.state.wanted={};c.state.leave={};
+ assert.equal(c.monthlyOffLimit(),9);assert.equal(c.monthlyWorkTarget(st),21);
+ c.setWanted('2026-09-02:1','O');assert.equal(c.monthlyWorkTarget(st),21);
+ c.saveUserShift('2026-09-03:1','V',true);assert.equal(c.monthlyWorkTarget(st),20);
+ c.state.monthOffLimits={'2026-09':10};assert.equal(c.monthlyWorkTarget(st),19);
+ c.state.monthStaff={'2026-09':[1]};
+ for(let d=1;d<=30;d++)c.setWanted(`2026-09-${c.pad(d)}:1`,'O');
+ const r=c.solveMonth();assert.equal(c.monthlyWorked(r.plan,1),0);
+ assert.ok(Object.values(c.analyzeMonth(r.plan)).flat().some(s=>s.includes('월 기준 OFF 10일보다')));
+ for(let d=1;d<=30;d++)assert.equal(r.plan[`2026-09-${c.pad(d)}:1`],'O');
 });
