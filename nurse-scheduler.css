@@ -651,3 +651,8 @@ button,input,select{font-size:inherit}
 .wanted-toggle{display:flex;align-items:center;gap:10px;margin:12px 0;font-size:17px;font-weight:700}.wanted-toggle input{width:22px;height:22px;flex-shrink:0}
 
 .month-off-setting{display:flex;align-items:center;gap:10px;margin:16px 0;font-weight:700}.month-off-setting input{width:76px;padding:8px;font:inherit}
+
+/* Additional rules keep the scope fields readable on smaller office displays. */
+.rule-coverage-fields{display:grid;grid-template-columns:70px minmax(110px,1fr);gap:6px}
+.rule-value-wrap{min-width:0}
+@media(max-width:700px){.rule-item{grid-template-columns:26px minmax(0,1fr) 32px}.rule-value-wrap{grid-column:2}.rule-remove{grid-column:3;grid-row:1}.rule-coverage-fields{grid-template-columns:70px minmax(90px,1fr)}}

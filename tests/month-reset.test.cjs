@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const vm=require('node:vm');
 const main=fs.readFileSync(path.join(__dirname,'../nurse-scheduler.js'),'utf8');
-const remove=main.slice(main.indexOf('function removeRelated('),main.indexOf('\nconst pad='));
+const remove=main.slice(main.indexOf('function removeRelated('),main.indexOf('function ensureMonthStaff'));
 const reset=main.slice(main.indexOf('function resetCurrentMonth('),main.indexOf('\nfunction openStaffModal('));
 function setup({saveOK=true,confirmed=true,snapshotMonth='2026-09'}={}){
  const wanted=Object.fromEntries(['D','E','N','M','O','O'].map((s,i)=>[`2026-09-0${i+1}:1`,s]));

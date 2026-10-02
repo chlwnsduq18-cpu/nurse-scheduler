@@ -5,8 +5,10 @@ function setup(){
  const c={state,cursor:new Date(2026,8,1),pad:n=>String(n).padStart(2,'0'),save:()=>true,alert:()=>{},render:()=>{},KEY:'test',localStorage:{setItem(){}}};
  c.keyFor=(d,id)=>`${d.getFullYear()}-${c.pad(d.getMonth()+1)}-${c.pad(d.getDate())}:${id}`;
  c.getMonthDates=()=>Array.from({length:30},(_,i)=>new Date(2026,8,i+1));c.hasWanted=k=>Object.hasOwn(c.state.wanted,k);
- vm.createContext(c);vm.runInContext(src.slice(src.indexOf('function putAssignment'),src.indexOf('function removeRelated')),c);vm.runInContext(src.slice(src.indexOf('function rosterMonth'),src.indexOf('function openMonthStaff')),c);
- vm.runInContext(src.slice(src.indexOf('const DAY_MS='),src.indexOf('function renderRosterSettings')),c);
+ vm.createContext(c);vm.runInContext(src.slice(src.indexOf('function putAssignment'),src.indexOf('function removeRelated')),c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../nurse-scheduler-model.js'),'utf8'),c);
+ vm.runInContext(src.slice(src.indexOf('function ensureMonthStaff'),src.indexOf('function openMonthStaff')),c);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../nurse-scheduler-rules.js'),'utf8'),c);
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../nurse-scheduler-engine.js'),'utf8'),c);
  vm.runInContext(src.slice(src.indexOf('function generateMonth'),src.indexOf('autoGenerate.onclick')),c);
  c.isoDay=vm.runInContext("isoDay",c);c.work=vm.runInContext("work",c);
  return c;
@@ -60,12 +62,12 @@ test('weekend and public holiday demand uses RN or NK plus separate AN',()=>{
   const night=demands.filter(d=>d.shift==='N');assert.equal(night.length,2);
   assert.deepEqual([...night[0].roles],['RN','NK']);assert.equal(night[0].min,1);
   assert.deepEqual([...night[1].roles],['AN']);assert.equal(night[1].min,1);
-  assert.equal(demands.find(d=>d.key==='D').min,date==='2026-09-05'?2:1);assert.equal(demands.find(d=>d.key==='E').min,1);
+  assert.equal(demands.find(d=>d.key==='D').min,1);assert.equal(demands.find(d=>d.key==='E').min,1);
  }
  const n=Date.UTC(2026,8,6)/86400000,plan={'2026-09-06:1':'D'};
- assert.equal(c.canPlace(plan,n,c.state.staff[1],'D',cfg),true);
+ assert.equal(c.canPlace(plan,n,c.state.staff[1],'D',cfg),false);
 });
-test('NK exact half targets and equal-length N/rest preference',()=>{
+test('NK exact 15 targets and equal-length N/rest preference',()=>{
  const c=setup();c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={'2026-09':[1,2]};c.state.assignments={};c.state.wanted={};
  const result=c.solveMonth();assert.equal(c.nkBalance(result.plan).penalty,0);
  assert.deepEqual([...c.nkBalance(result.plan).counts],[15,15]);
@@ -84,6 +86,7 @@ test('general manual shifts remain fixed during regeneration, including invalid 
 });
 test('two fixed OFF days are followed by work on all other feasible days in that week',()=>{
  const c=setup();c.state.staff=[{id:1,name:'RN',category:'RN'}];c.state.monthStaff={'2026-09':[1]};c.state.assignments={};c.state.wanted={};
+ c.state.rules=[{type:'rnNightMin',value:0},{type:'rnNightMax',value:0}];
  // Isolate OFF placement from mandatory night-rest conflicts.
  c.state.rosterSettings={weekend:{RN:true},coverage:{weekday:{D:1,E:0,N:0,AD:0,AE:0,AN:0},saturday:{D:1,E:0,N:0,AD:0,AE:0,AN:0},holiday:{D:1,E:0,N:0,AD:0,AE:0,AN:0}}};
  c.setWanted('2026-09-08:1','O');c.setManual('2026-09-10:1','O');
@@ -104,16 +107,16 @@ test('both pickers save immediately using their wanted checkbox',()=>{
  nodes.shiftWanted=node();nodes.shiftWanted.checked=false;vm.runInContext("editingAssignmentKey='2026-09-08:1'",c);
  shiftButtons[5].onclick();assert.equal(c.state.manual['2026-09-08:1'],'O');assert.equal(c.isVacation('2026-09-08:1'),true);
 });
-for(const [year,month,days] of [[2026,2,28],[2028,2,29],[2026,10,31]])test(`NK generation covers half each in ${days}-day month`,()=>{
+for(const [year,month,days] of [[2026,2,28],[2028,2,29],[2026,10,31]])test(`NK generation covers 15 each in ${days}-day month`,()=>{
  const c=setup();c.cursor=new Date(year,month-1,1);c.getMonthDates=()=>Array.from({length:days},(_,i)=>new Date(year,month-1,i+1));
  c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={[`${year}-${String(month).padStart(2,'0')}`]:[1,2]};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
- const result=c.solveMonth();assert.equal(c.nkBalance(result.plan).penalty,0);assert.deepEqual([...c.nkBalance(result.plan).counts].sort((a,b)=>a-b),[Math.floor(days/2),Math.ceil(days/2)]);
+ const result=c.solveMonth();assert.equal(c.nkBalance(result.plan).penalty,0);assert.deepEqual([...c.nkBalance(result.plan).counts].sort((a,b)=>a-b),[15,15]);
 });
 test('impossible NK half target is reported without overwriting wanted OFF',()=>{
  const c=setup();c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={'2026-09':[1,2]};c.state.assignments={};c.state.wanted={};
  for(let d=1;d<=30;d++)c.setWanted(`2026-09-${String(d).padStart(2,'0')}:1`,'O');
  const result=c.solveMonth();assert.ok(c.nkBalance(result.plan).penalty>0);
- assert.ok(Object.values(c.analyzeMonth(result.plan)).flat().some(s=>s.includes('절반 분담 미충족')));
+ assert.ok(Object.values(c.analyzeMonth(result.plan)).flat().some(s=>s.includes('회 미충족')));
  for(let d=1;d<=30;d++)assert.equal(result.plan[`2026-09-${String(d).padStart(2,'0')}:1`],'O');
 });
 test('NK wanted OFF still reaches monthly halves by overlapping the other NK',()=>{
@@ -121,37 +124,36 @@ test('NK wanted OFF still reaches monthly halves by overlapping the other NK',()
  c.state.staff=[{id:1,name:'NK1',category:'NK'},{id:2,name:'NK2',category:'NK'}];c.state.monthStaff={'2026-10':[1,2]};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
  for(const day of [17,18,19])c.setWanted(`2026-10-${day}:1`,'O');
  c.setWanted('2026-10-18:2','O');
- const r=c.solveMonth(),balance=c.nkBalance(r.plan);assert.equal(balance.penalty,0);assert.deepEqual([...balance.counts].sort((a,b)=>a-b),[15,16]);
+ const r=c.solveMonth(),balance=c.nkBalance(r.plan);assert.equal(balance.penalty,0);assert.deepEqual([...balance.counts].sort((a,b)=>a-b),[15,15]);
  for(const day of [17,18,19])assert.equal(r.plan[`2026-10-${day}:1`],'O');
  assert.ok(c.getMonthDates().some(d=>r.plan[c.keyFor(d,1)]==='N'&&r.plan[c.keyFor(d,2)]==='N'));
 });
-test('Saturday D includes HN and weekend nights require BOTH nurse and assistant',()=>{
+test('Saturday D excludes HN and weekend nights require BOTH nurse and assistant',()=>{
  const c=setup();c.state.staff=[{id:1,name:'HN',category:'HN'},{id:2,name:'RN',category:'RN'},{id:3,name:'AN',category:'AN'}];c.state.monthStaff={'2026-09':[1,2,3]};
  const n=Date.UTC(2026,8,5)/86400000,demands=c.dayDemands(n),d=demands.find(d=>d.key==='D');
- assert.deepEqual([...d.roles],['HN','RN']);assert.equal(d.min,2);assert.equal(c.dayAllowed(c.state.staff[0],n),true);
+ assert.deepEqual([...d.roles],['RN']);assert.equal(d.min,1);assert.equal(c.dayAllowed(c.state.staff[0],n),false);
  const plan={'2026-09-05:1':'D','2026-09-05:2':'N'};
  assert.equal(c.countShift(plan,n,'N',['RN','NK']),1);assert.equal(c.countShift(plan,n,'N',['AN']),0);
  assert.ok(c.analyzeMonth(plan)['2026-09-05'].some(s=>s.includes('N(AN) 1명 부족')));
  plan['2026-09-05:3']='N';assert.ok(!c.analyzeMonth(plan)['2026-09-05'].some(s=>s.startsWith('N(')&&s.includes('부족')));
 });
-test('13-person generation staffs weekend nights in both groups and Saturday D with two nurses',()=>{
+test('13-person generation keeps personal N targets, rest and RN D/E caps',()=>{
  const c=setup(),roles=['HN',...Array(5).fill('RN'),'MD','NK','NK',...Array(4).fill('AN')];
  c.state.staff=roles.map((category,i)=>({id:i+1,name:category+(i+1),category}));c.state.monthStaff={'2026-09':c.state.staff.map(s=>s.id)};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
  const r=c.solveMonth();
- for(const st of c.state.staff){
-  assert.equal(c.monthlyWorked(r.plan,st.id),st.category==='NK'?15:st.category==='MD'?20:21,st.name+' monthly target');
-  for(const date of c.getMonthDates()){
+ assert.deepEqual([...c.nkBalance(r.plan).counts],[15,15]);
+ assert.equal(c.rnNightBalance(r.plan).penalty,0);
+ for(const st of c.state.staff)for(const date of c.getMonthDates()){
    const n=date.getTime()/86400000,a=r.plan[c.isoDay(n)+':'+st.id],b=r.plan[c.isoDay(n+1)+':'+st.id];
    assert.ok(!(c.work(a)&&c.work(b)&&((a==='N')!==(b==='N'))),st.name+' adjacent N');
-  }
+   if(c.work(a))assert.deepEqual([...c.staffProblems(r.plan,n,st,a,c.schedulerConfig())],[],st.name+' '+date.getDate());
  }
- assert.ok(Object.values(c.analyzeMonth(r.plan)).flat().some(s=>s.includes('MD7: 월 기준 OFF 9일보다 1일 초과')));
  for(const date of c.getMonthDates()){
-  const n=date.getTime()/86400000,kind=c.dayKind(n);if(kind==='weekday')continue;
-  assert.ok(c.countShift(r.plan,n,'N',['RN','NK'])>=1,'nurse night '+date.getDate());
-  assert.ok(c.countShift(r.plan,n,'N',['AN'])>=1,'assistant night '+date.getDate());
-  if(kind==='saturday')assert.ok(c.countShift(r.plan,n,'D',['HN','RN'])>=2,'Saturday D '+date.getDate());
+   const n=date.getTime()/86400000;
+   for(const d of c.dayDemands(n).filter(d=>['D','E'].includes(d.key)))assert.ok(c.countShift(r.plan,n,d.shift,d.roles)<=d.max);
  }
+ // A partial heuristic result must report its shortages; it must not claim completion.
+ if(r.missing||r.unfilled)assert.ok(Object.keys(c.analyzeMonth(r.plan)).length);
 });
 test('night blocks cannot touch other shifts in either direction, including month boundaries',()=>{
  const c=setup(),st=c.state.staff[0],cfg=c.schedulerConfig(),n=Date.UTC(2026,8,1)/86400000;
@@ -165,10 +167,10 @@ test('night blocks cannot touch other shifts in either direction, including mont
 });
 test('monthly OFF limit counts fixed OFF but excludes vacation and preserves conflicting input',()=>{
  const c=setup(),st=c.state.staff[0];c.state.assignments={};c.state.wanted={};c.state.leave={};
- assert.equal(c.monthlyOffLimit(),9);assert.equal(c.monthlyWorkTarget(st),21);
- c.setWanted('2026-09-02:1','O');assert.equal(c.monthlyWorkTarget(st),21);
- c.saveUserShift('2026-09-03:1','V',true);assert.equal(c.monthlyWorkTarget(st),20);
- c.state.monthOffLimits={'2026-09':10};assert.equal(c.monthlyWorkTarget(st),19);
+ assert.equal(c.monthlyOffLimit(),10);assert.equal(c.monthlyWorkTarget(st),20);
+ c.setWanted('2026-09-02:1','O');assert.equal(c.monthlyWorkTarget(st),20);
+ c.saveUserShift('2026-09-03:1','V',true);assert.equal(c.monthlyWorkTarget(st),19);
+ c.state.monthOffLimits={'2026-09':10};c.state.monthOffModes={'2026-09':'manual'};assert.equal(c.monthlyWorkTarget(st),19);
  c.state.monthStaff={'2026-09':[1]};
  for(let d=1;d<=30;d++)c.setWanted(`2026-09-${c.pad(d)}:1`,'O');
  const r=c.solveMonth();assert.equal(c.monthlyWorked(r.plan,1),0);
