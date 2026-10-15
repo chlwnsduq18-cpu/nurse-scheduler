@@ -30,10 +30,15 @@ function coverageLimits(n,sh,group,cfg){
 }
 function preferenceScore(sh,cfg){return cfg.preferred===sh?-8:0}
 
+function validShiftTime(t){
+ if(!t||!/^([01]\d|2[0-3]):[0-5]\d$/.test(t.start)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(t.end))return false;
+ const minutes=v=>Number(v.slice(0,2))*60+Number(v.slice(3)),a=minutes(t.start),b=minutes(t.end),span=(b<=a?b+1440:b)-a,pause=Number(t.breakMinutes),hours=(span-pause)/60;
+ return Number.isInteger(pause)&&pause>=0&&pause<span&&hours>0&&hours<=8&&pause>=(hours>=8?60:hours>=4?30:0);
+}
 const timingCache=new Map();
 function shiftTiming(sh){
-  const t=(state.shiftTimes||defaultShiftTimes)[sh];
-  if(!t)return null;
+  const t=state.shiftTimes?.[sh]||defaultShiftTimes[sh];
+  if(!t||!validShiftTime(t))return null;
   const cacheKey=t.start+"/"+t.end+"/"+t.breakMinutes;
   if(timingCache.has(cacheKey))return timingCache.get(cacheKey);
   const minutes=s=>Number(s.split(':')[0])*60+Number(s.split(':')[1]);
@@ -62,7 +67,10 @@ const HOLIDAYS_2026={
 };
 const ROSTER_DEFAULTS={weekend:{HN:false,RN:true,MD:false,NK:true,AN:true},coverage:{
  weekday:{D:2,E:2,N:2,AD:1,AE:1,AN:0},saturday:{D:1,E:1,N:1,AD:1,AE:1,AN:1},holiday:{D:1,E:1,N:1,AD:1,AE:1,AN:1}}};
-function rosterSettings(){return state.rosterSettings||ROSTER_DEFAULTS}
+function rosterSettings(){
+ const saved=state.rosterSettings||{};
+ return {weekend:{...ROSTER_DEFAULTS.weekend,...saved.weekend},coverage:Object.fromEntries(['weekday','saturday','holiday'].map(kind=>[kind,{...ROSTER_DEFAULTS.coverage[kind],...saved.coverage?.[kind]}]))};
+}
 function holidaysFor(year){return state.holidayYears?.[year]?.dates||(year===2026?HOLIDAYS_2026:{})}
 function holidayName(n){return holidaysFor(new Date(n*DAY_MS).getUTCFullYear())[isoDay(n)]||''}
 function dayKind(n){return holidayName(n)||new Date(n*DAY_MS).getUTCDay()===0?'holiday':new Date(n*DAY_MS).getUTCDay()===6?'saturday':'weekday'}
@@ -88,7 +96,7 @@ function dayDemands(n,cfg=schedulerConfig()){
    return {key,shift,roles,min,max:Math.min(limits.max,fixed?min:Infinity),label};
  };
  return [
-   demand('D','D',['RN'],c.D,'D(RN)',true),demand('E','E',['RN'],c.E,'E(RN)',true),
+   demand('D','D',dayKind(n)==='weekday'?['HN','RN']:['RN'],c.D,dayKind(n)==='weekday'?'D(HN+RN)':'D(RN)',true),demand('E','E',['RN'],c.E,'E(RN)',true),
    demand('NR','N',['RN','NK'],c.N,'N(RN/NK)'),
    demand('AD','D',['AN'],c.AD,'D(AN)'),demand('AE','E',['AN'],c.AE,'E(AN)'),demand('AN','N',['AN'],c.AN,'N(AN)'),midDemand(n,cfg),
    ...(otherMid.min>0?[{key:'XM',shift:'M',roles:otherMidGroup==='AN'?['AN']:['MD','RN'],min:otherMid.min,max:otherMid.max,label:`M(${otherMidGroup==='AN'?'AN':'간호사'}·기본 담당일과 충돌)`}]:[])

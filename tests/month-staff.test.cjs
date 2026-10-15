@@ -137,7 +137,7 @@ test('Saturday D excludes HN and weekend nights require BOTH nurse and assistant
  assert.ok(c.analyzeMonth(plan)['2026-09-05'].some(s=>s.includes('N(AN) 1명 부족')));
  plan['2026-09-05:3']='N';assert.ok(!c.analyzeMonth(plan)['2026-09-05'].some(s=>s.startsWith('N(')&&s.includes('부족')));
 });
-test('13-person generation keeps personal N targets, rest and RN D/E caps',()=>{
+test('13-person generation keeps personal N targets, rest and HN/RN D caps',()=>{
  const c=setup(),roles=['HN',...Array(5).fill('RN'),'MD','NK','NK',...Array(4).fill('AN')];
  c.state.staff=roles.map((category,i)=>({id:i+1,name:category+(i+1),category}));c.state.monthStaff={'2026-09':c.state.staff.map(s=>s.id)};c.state.assignments={};c.state.wanted={};c.state.generationSnapshot=null;
  const r=c.solveMonth();

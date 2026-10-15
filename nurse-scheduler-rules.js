@@ -8,6 +8,7 @@ function migrateRosterRules(data){
  data.monthOffLimits=data.monthOffLimits||{};data.monthOffModes=data.monthOffModes||{};
  if((data.schemaVersion||0)<14){
    if(data.rosterSettings){
+     data.rosterSettings.coverage=data.rosterSettings.coverage||{};
      data.rosterSettings.weekend={...data.rosterSettings.weekend,HN:false,MD:false};
      for(const kind of ['weekday','saturday','holiday']){
        data.rosterSettings.coverage[kind]={...data.rosterSettings.coverage[kind],D:kind==='weekday'?2:1,E:kind==='weekday'?2:1,N:kind==='weekday'?2:1};

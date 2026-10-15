@@ -1,13 +1,28 @@
 
 const KEY="small-hospital-nurse-scheduler-v1";
-let state=JSON.parse(localStorage.getItem(KEY)||"null")||{
+let storageReadFailure='';
+function initialState(){return {
   staff:[
     {id:1,name:"김민지"},{id:2,name:"이수진"},{id:3,name:"박지현"},
     {id:4,name:"최유진"},{id:5,name:"정하늘"},{id:6,name:"한서윤"}
-  ], 
-  assignments:{},
-  rules:[]
-};
+  ],assignments:{},rules:[]
+}}
+function readStoredState(){
+  try{
+    const raw=localStorage.getItem(KEY);
+    if(raw===null)return initialState();
+    const data=JSON.parse(raw),record=v=>v!==null&&typeof v==='object'&&!Array.isArray(v);
+    if(!record(data)||!Array.isArray(data.staff)||!Array.isArray(data.rules)||data.rules.some(v=>!record(v))||data.staff.some(st=>!record(st)||!Number.isSafeInteger(st.id)||typeof st.name!=='string')||new Set(data.staff.map(st=>st.id)).size!==data.staff.length)throw Error('저장 데이터 형식 오류');
+    for(const key of ['assignments','wanted','manual','leave','monthStaff','holidayYears','monthOffLimits','monthOffModes','shiftTimes','rosterSettings'])if(data[key]!=null&&!record(data[key]))throw Error('저장 데이터 항목 오류');
+    if(data.generationSnapshot!=null&&(!record(data.generationSnapshot)||!record(data.generationSnapshot.shifts)))throw Error('스냅샷 형식 오류');
+    if(data.monthStaff&&Object.values(data.monthStaff).some(ids=>!Array.isArray(ids)))throw Error('월별 인원 형식 오류');
+    return data;
+  }catch(error){
+    storageReadFailure='기존 저장 데이터를 읽지 못했습니다. 원본을 보호하기 위해 저장과 자동생성을 중단했습니다. 브라우저 저장 권한이나 데이터 상태를 확인한 뒤 새로고침해주세요.';
+    alert(storageReadFailure);return initialState();
+  }
+}
+let state=readStoredState();
 
 if(!state.rules) state.rules = [];
 if(!state.staff) state.staff = [];
@@ -35,7 +50,7 @@ state.manual=state.manual||{};
 migrateRosterRules(state);
 state.monthStaff=state.monthStaff||{};
 // Freeze existing months before membership is edited; preserve historical rosters.
-for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted)]){
+for(const k of [...Object.keys(state.assignments),...Object.keys(state.wanted),...Object.keys(state.manual)]){
   const month=k.slice(0,7);
   if(/^\d{4}-\d{2}$/.test(month)&&!Object.hasOwn(state.monthStaff,month))state.monthStaff[month]=state.staff.map(st=>st.id);
 }
@@ -43,13 +58,21 @@ if(state.rosterSettings?.weekend)state.rosterSettings.weekend.MD=false;
 state.leave=state.leave||{};
 state.holidayYears=state.holidayYears||{};
 state.generationSnapshot=state.generationSnapshot||null; // One latest snapshot, never a history array.
-let cursor=new Date(2026,8,1);
+let cursor=new Date();
+cursor=new Date(cursor.getFullYear(),cursor.getMonth(),1);
 let viewMode="calendar";
 const save=()=>{
+  if(storageReadFailure)return false;
   try{localStorage.setItem(KEY,JSON.stringify(state));return true}
-  catch(error){alert("저장하지 못했습니다. 브라우저 저장 공간 또는 저장 권한을 확인해주세요. 현재 변경은 이 화면에만 남아 있습니다.");return false}
+  catch(error){alert("저장하지 못했습니다. 브라우저 저장 공간 또는 저장 권한을 확인해주세요. 기존 저장 데이터는 유지됩니다. 다시 시도해주세요.");return false}
 };
 save();
+
+// A failed write must not leave an unsaved change visible or eligible for export.
+function commitChange(change){
+  const previous=JSON.parse(JSON.stringify(state));change();
+  if(!save()){state=previous;return false}return true;
+}
 
 function putAssignment(k,shift){state.assignments[k]=1;state.assignments[k+"_type"]=shift}
 function setWanted(k,shift){
@@ -92,7 +115,8 @@ function removeRelated(predicate){
 function ensureMonthStaff(){
   const month=rosterMonth();
   if(!Object.hasOwn(state.monthStaff,month)){
-    state.monthStaff[month]=[...monthStaffIds(month)];save();
+    const previous=state.monthStaff;state.monthStaff={...previous,[month]:[...monthStaffIds(month)]};
+    if(!save())state.monthStaff=previous;
   }
 }
 function saveMonthStaff(ids){
@@ -153,11 +177,11 @@ function render(){
     el.querySelector(".edit").onclick=()=>openStaffModal(s.id);
     el.querySelector(".del:not(.edit)").onclick=()=>{
       if(confirm(`${s.name} 간호사를 삭제할까요?`)){
-        state.staff=state.staff.filter(x=>x.id!==s.id);
-        Object.keys(state.monthStaff).forEach(m=>state.monthStaff[m]=state.monthStaff[m].filter(id=>id!==s.id));
-        removeRelated(k=>k.endsWith(":"+s.id));
-        save();
-        render();
+        if(commitChange(()=>{
+          state.staff=state.staff.filter(x=>x.id!==s.id);
+          Object.keys(state.monthStaff).forEach(m=>state.monthStaff[m]=state.monthStaff[m].filter(id=>id!==s.id));
+          removeRelated(k=>k.endsWith(":"+s.id));
+        }))render();
       }
     };
     staffList.appendChild(el);
@@ -311,19 +335,18 @@ function moveAssignmentToDate(e,dateKey){
   if(staffId){
     if(!activeStaff(dateKey.slice(0,7)).some(st=>st.id===staffId)){alert('이번 달 편성 인원에서 먼저 포함해주세요.');return}
     const newKey=`${dateKey}:${staffId}`;
-    if(!state.assignments[newKey]){
-      openAssignmentModal(dateKey,staffId);
-    }
+    openAssignmentModal(dateKey,staffId);
     return;
   }
   if(fromKey){
+    if(!state.assignments[fromKey]&&!hasFixed(fromKey))return;
     const parts=fromKey.split(":");
     const id=Number(parts[1]);
     if(!activeStaff(dateKey.slice(0,7)).some(st=>st.id===id)){alert('해당 월의 편성 인원에 포함되지 않은 직원입니다.');return}
     const newKey=`${dateKey}:${id}`;
     if(fromKey===newKey)return;
-    if(state.assignments[newKey]){
-      alert("해당 날짜에 이미 같은 간호사가 배정되어 있습니다.");
+    if(hasFixed(newKey)||(state.assignments[newKey]&&state.assignments[newKey+"_type"]!=="O")){
+      alert("해당 날짜에 이미 근무 또는 사용자 지정 일정이 있습니다. 셀을 눌러 확인·수정해주세요.");
       return;
     }
     const oldType=isVacation(fromKey)?"V":state.assignments[fromKey+"_type"]||"D";
@@ -413,6 +436,10 @@ function renderRules(){
  if(!ruleDraft.length){ruleList.innerHTML='<div class="hint">추가 규칙이 없습니다. 기본 기준이 적용됩니다.</div>';return}
  ruleDraft.forEach((rule,i)=>{
    const row=document.createElement('div');row.className='rule-item';
+   if(!RULE_TYPES[rule.type]){
+     row.innerHTML=`<div class="rule-order">${i+1}</div><span>지원하지 않는 규칙: ${esc(rule.type)} · 삭제 후 다시 설정해주세요.</span><button class="rule-remove" title="규칙 삭제">×</button>`;
+     row.querySelector('.rule-remove').onclick=()=>{ruleDraft.splice(i,1);renderRules()};ruleList.appendChild(row);return;
+   }
    row.innerHTML=`<div class="rule-order">${i+1}</div><select class="rule-type" aria-label="추가 규칙 종류">${Object.entries(RULE_TYPES).map(([key,def])=>`<option value="${key}">${def.label}</option>`).join('')}</select><div class="rule-value-wrap"></div><button class="rule-remove" title="규칙 삭제">×</button>`;
    const type=row.querySelector('.rule-type'),wrap=row.querySelector('.rule-value-wrap');type.value=rule.type;
    const buildValue=()=>{
@@ -456,6 +483,7 @@ saveRules.onclick=()=>{
     if(!input.value || !input.checkValidity()){alert('근무시간과 휴게시간을 올바르게 입력해주세요.');return}
     shiftTimes[input.dataset.code][input.dataset.field]=input.dataset.field==='breakMinutes'?Number(input.value):input.value;
   }
+  for(const code of ['D','E','N','M'])if(!validShiftTime(shiftTimes[code])){alert(code+' 근무시간·휴게시간을 확인해주세요. 실근무는 8시간 이내여야 합니다.');return}
   const rules=JSON.parse(JSON.stringify(ruleDraft)),errors=validateRules(rules);
   if(errors.length){alert(errors.join('\n'));return}
   const previous=JSON.parse(JSON.stringify(state));
@@ -481,12 +509,13 @@ function loadExcelModules(){
     document.head.appendChild(script);
   });
   excelModulesPromise=load('vendor/jszip.min.js',()=>!!globalThis.JSZip)
-    .then(()=>load('nurse-scheduler-excel.js?v=20261002-rules5',()=>!!globalThis.NurseSchedulerExcel))
+    .then(()=>load('nurse-scheduler-excel.js?v=20261015-rules6.1',()=>!!globalThis.NurseSchedulerExcel))
     .catch(error=>{excelModulesPromise=null;throw error;});
   return excelModulesPromise;
 }
 exportExcel.onclick=async()=>{
   if(exportExcel.disabled)return;
+  if(typeof storageReadFailure!=='undefined'&&storageReadFailure){alert(storageReadFailure);return}
   if(location.protocol==='file:'){
     alert('템플릿을 읽으려면 GitHub Pages 또는 http://localhost:8080에서 사이트를 열어주세요. HTML 파일을 직접 열면 브라우저가 엑셀 파일 접근을 제한합니다.');
     return;
@@ -579,15 +608,17 @@ saveStaff.onclick=()=>{
     phone:staffPhoneInput.value.trim(),
     memo:staffMemoInput.value.trim()
   };
-  if(id){
-    const s=state.staff.find(x=>x.id===id);
-    Object.assign(s,data);
-  }else{
-    const newId=Date.now();
-    state.staff.push({id:newId,...data});
-    state.monthStaff[rosterMonth()]=[...monthStaffIds(),newId];
-  }
-  save(); closeStaffModal(); render();
+  if(!['HN','RN','MD','NK','AN'].includes(data.category)||!Number.isFinite(data.career)||data.career<0){alert('직군과 경력을 확인해주세요.');return}
+  if(!commitChange(()=>{
+    if(id){
+      const employee=state.staff.find(x=>x.id===id);if(employee)Object.assign(employee,data);
+    }else{
+      let newId=Date.now();while(state.staff.some(st=>st.id===newId))newId++;
+      const ids=[...monthStaffIds()];state.staff.push({id:newId,...data});
+      state.monthStaff[rosterMonth()]=[...ids,newId];
+    }
+  }))return;
+  closeStaffModal();render();
 };
 
 let editingAssignmentKey=null;
@@ -606,7 +637,7 @@ const closeShiftModalButton=document.getElementById("closeShiftModal");
 closeShiftModalButton.onclick=closeShiftModal;
 shiftModal.addEventListener("click",e=>{if(e.target===shiftModal)closeShiftModal()});
 document.querySelectorAll("#shiftOptions .shift-option").forEach(b=>b.onclick=()=>{if(!editingAssignmentKey)return;if(!saveUserShift(editingAssignmentKey,b.dataset.shift,document.getElementById("shiftWanted").checked))return;closeShiftModal();render()});
-deleteAssignment.onclick=()=>{if(!editingAssignmentKey)return;releaseWanted(editingAssignmentKey);save();closeShiftModal();render()};
+deleteAssignment.onclick=()=>{if(!editingAssignmentKey)return;if(!commitChange(()=>releaseWanted(editingAssignmentKey)))return;closeShiftModal();render()};
 
 document.addEventListener("keydown",e=>{
   if(e.key!=="Escape") return;
@@ -619,11 +650,11 @@ document.addEventListener("keydown",e=>{
 function showValidation(){
  const issues=analyzeMonth(),entries=Object.entries(issues),year=cursor.getFullYear();
  const known=state.holidayYears?.[year]?state.holidayYears[year].confirmed:year===2026;
- generationStatus.innerHTML=`<div>간호사/AN 별도 인원 · 공휴일 우선 · 주말 설정: 편성 규칙 · <span class="vacation-legend">휴가</span>${!known?' · ⚠ 이 연도 공휴일 입력·확인이 필요합니다.':''}${!state.shiftTimesConfirmed?' · 근무시간은 예시입니다.':''}</div><details><summary>${entries.length?`⚠ 확인 필요 ${entries.length}일 — 사유 보기`:'기본 편성 검사에서 부족·초과 없음'}</summary>${entries.map(([dk,msg])=>`<div><b>${dk}</b> ${esc(msg.join(' / '))}</div>`).join('')}</details>`;
+ generationStatus.innerHTML=(storageReadFailure?`<p>${esc(storageReadFailure)}</p>`:'')+`<div>간호사/AN 별도 인원 · 공휴일 우선 · 주말 설정: 편성 규칙 · <span class="vacation-legend">휴가</span>${!known?' · ⚠ 이 연도 공휴일 입력·확인이 필요합니다.':''}${!state.shiftTimesConfirmed?' · 근무시간은 예시입니다.':''}</div><details><summary>${entries.length?`⚠ 확인 필요 ${entries.length}일 — 사유 보기`:'기본 편성 검사에서 부족·초과 없음'}</summary>${entries.map(([dk,msg])=>`<div><b>${dk}</b> ${esc(msg.join(' / '))}</div>`).join('')}</details>`;
  return issues;
 }
 function renderRosterSettings(){
- document.getElementById('offModeManual').onchange=()=>{const manual=document.getElementById('offModeManual').checked;document.getElementById('monthlyOffLimit').disabled=!manual;if(!manual)document.getElementById('monthlyOffLimit').value=calendarOffCount()};
+ document.getElementById('offModeManual').onchange=()=>{const manual=document.getElementById('offModeManual').checked;document.getElementById('monthlyOffLimit').disabled=!manual;if(!manual)holidayDates.oninput?.()};
 
  const manual=state.monthOffModes?.[rosterMonth()]==='manual';
  document.getElementById('offModeManual').checked=manual;
@@ -631,13 +662,21 @@ function renderRosterSettings(){
  document.getElementById('offCalendarCount').textContent=calendarOffCount()+'일 (토·일·공휴일 중복 제외)';
  const settings=rosterSettings();
  weekendSettings.innerHTML=['HN','RN','MD','NK','AN'].map(role=>`<label><input type="checkbox" data-role="${role}" ${!['HN','MD'].includes(role)&&settings.weekend[role]?'checked':''} ${['HN','MD'].includes(role)?'disabled':''}> ${role} ${['HN','MD'].includes(role)?'주말·공휴일 OFF (고정)':'주말·공휴일 근무 가능'}</label>`).join('');
- coverageSettings.innerHTML='<table class="coverage-editor"><thead><tr><th>날짜</th><th>D RN(고정)</th><th>E RN(고정)</th><th>N RN+NK(최소)</th><th>D AN</th><th>E AN</th><th>N AN</th></tr></thead><tbody>'+Object.entries(settings.coverage).map(([kind,row])=>`<tr><th>${{weekday:'평일',saturday:'토요일',holiday:'일요일·공휴일'}[kind]}</th>${['D','E','N','AD','AE','AN'].map(key=>`<td><input type="number" min="0" max="30" step="1" data-kind="${kind}" data-field="${key}" value="${row[key]}" aria-label="${kind} ${key}"></td>`).join('')}</tr>`).join('')+'</tbody></table>';
+ coverageSettings.innerHTML='<table class="coverage-editor"><thead><tr><th>날짜</th><th>D HN+RN(고정)</th><th>E RN(고정)</th><th>N RN+NK(최소)</th><th>D AN</th><th>E AN</th><th>N AN</th></tr></thead><tbody>'+Object.entries(settings.coverage).map(([kind,row])=>`<tr><th>${{weekday:'평일',saturday:'토요일',holiday:'일요일·공휴일'}[kind]}</th>${['D','E','N','AD','AE','AN'].map(key=>`<td><input type="number" min="0" max="30" step="1" data-kind="${kind}" data-field="${key}" value="${row[key]}" aria-label="${kind} ${key}"></td>`).join('')}</tr>`).join('')+'</tbody></table>';
  const year=cursor.getFullYear();holidayYearLabel.textContent=year+'년 공휴일';
  holidayDates.value=Object.entries(holidaysFor(year)).sort().map(([day,name])=>day+' '+name).join('\n');
  confirmHolidayYear.checked=state.holidayYears?.[year]?!!state.holidayYears[year].confirmed:year===2026;
+ holidayDates.oninput=()=>{
+   try{const draft=readRosterSettings();
+     const count=getMonthDates().filter(d=>isWeekend(dayNumber(keyFor(d,0).split(':')[0]))||draft.calendar.dates[keyFor(d,0).split(':')[0]]).length;
+     document.getElementById('offCalendarCount').textContent=count+'일 (토·일·공휴일 중복 제외)';if(draft.offMode==='calendar')document.getElementById('monthlyOffLimit').value=count;
+   }catch(error){/* Invalid date text is reported on save; leave the last valid preview. */}
+ };
 }
 function readRosterSettings(){
- const offLimit=Number(document.getElementById('monthlyOffLimit').value);
+ const offInput=document.getElementById('monthlyOffLimit');
+ if(document.getElementById('offModeManual').checked&&offInput.value==='')throw Error('월 기준 OFF 일수를 입력해주세요.');
+ const offLimit=Number(offInput.value);
  if(!Number.isInteger(offLimit)||offLimit<0||offLimit>getMonthDates().length)throw Error('월 기준 OFF는 0부터 해당 월 일수까지의 정수로 입력해주세요.');
  const settings=JSON.parse(JSON.stringify(ROSTER_DEFAULTS));
  for(const el of weekendSettings.querySelectorAll('input'))settings.weekend[el.dataset.role]=['HN','MD'].includes(el.dataset.role)?false:el.checked;
@@ -655,6 +694,7 @@ function readRosterSettings(){
 }
 
 function generateMonth(){
+  if(typeof storageReadFailure!=='undefined'&&storageReadFailure){alert(storageReadFailure);return false}
   const year=cursor.getFullYear();
   if(!(state.holidayYears[year]?state.holidayYears[year].confirmed:year===2026)){
     alert('편성 규칙에서 '+year+'년 공휴일 목록을 입력하고 확인해주세요.');return false;
@@ -664,6 +704,7 @@ function generateMonth(){
   return applyGeneratedMonth(solveMonth());
 }
 function applyGeneratedMonth(result){
+  if(typeof storageReadFailure!=='undefined'&&storageReadFailure){alert(storageReadFailure);return false}
   const next=JSON.parse(JSON.stringify(state)),shifts=state.generationSnapshot?.month===rosterMonth()?{...state.generationSnapshot.shifts}:{};
   for(const date of getMonthDates())for(const st of activeStaff()){const k=keyFor(date,st.id);shifts[k]=result.plan[k];next.assignments[k]=1;next.assignments[k+'_type']=shifts[k]}
   next.generationSnapshot={month:result.month,savedAt:new Date().toISOString(),shifts};
@@ -676,7 +717,7 @@ function applyGeneratedMonth(result){
 function solveMonthInWorker(){
  if(typeof Worker==='undefined'||location.protocol==='file:')return Promise.resolve().then(()=>solveMonth());
  return new Promise((resolve,reject)=>{
-   const worker=new Worker(new URL('nurse-scheduler-worker.js?v=20261002-rules5',document.baseURI));
+   const worker=new Worker(new URL('nurse-scheduler-worker.js?v=20261015-rules6.1',document.baseURI));
    worker.onmessage=e=>{worker.terminate();e.data.error?reject(new Error(e.data.error)):resolve(e.data.result)};
    worker.onerror=()=>{worker.terminate();reject(new Error('자동생성 계산 파일을 읽지 못했습니다. 배포 폴더의 Worker/규칙/계산 파일을 확인해주세요.'))};
    worker.postMessage({state,year:cursor.getFullYear(),month:cursor.getMonth()});
@@ -684,10 +725,11 @@ function solveMonthInWorker(){
 }
 autoGenerate.onclick=async()=>{
  if(autoGenerate.disabled)return;
+ if(storageReadFailure){alert(storageReadFailure);return}
  if(!activeStaff().length){alert('이번 달 편성 인원을 선택해주세요.');return}
  const errors=validateRules(state.rules||[]);if(errors.length){alert(errors.join('\n'));return}
  const year=cursor.getFullYear();if(!(state.holidayYears[year]?state.holidayYears[year].confirmed:year===2026)){alert('편성 규칙에서 '+year+'년 공휴일 목록을 입력하고 확인해주세요.');return}
- if(!confirm('원티드·일반 수동 조정·휴가를 보호하고 새 편성 기준으로 생성할까요?\nRN/NK 월 N 횟수와 묶음·휴식은 추가 규칙을 적용합니다. D/E는 RN 고정 인원입니다. AN은 별도 인원입니다. 미충족 사유는 붉은색으로 표시합니다.'+(state.shiftTimesConfirmed?'':'\n근무시간은 예시입니다. 실제 시간 설정을 확인해주세요.')))return;
+ if(!confirm('원티드·일반 수동 조정·휴가를 보호하고 새 편성 기준으로 생성할까요?\nRN/NK 월 N 횟수와 묶음·휴식은 추가 규칙을 적용합니다. 평일 D는 HN+RN 합산, E는 RN 인원입니다. AN은 별도 인원입니다. 미충족 사유는 붉은색으로 표시합니다.'+(state.shiftTimesConfirmed?'':'\n근무시간은 예시입니다. 실제 시간 설정을 확인해주세요.')))return;
  const before=JSON.stringify(state),month=rosterMonth();
  autoGenerate.disabled=true;autoGenerate.textContent='편성 중…';
  try{
@@ -698,8 +740,8 @@ autoGenerate.onclick=async()=>{
  finally{autoGenerate.disabled=false;autoGenerate.textContent='자동 생성'}
 };
 function renderTimeSettings(){
-  const times=state.shiftTimes||defaultShiftTimes;
-  shiftTimeSettings.innerHTML=['D','E','N','M'].map(sh=>`<div class="time-setting"><b>${sh}</b><label>시작<input type="time" data-code="${sh}" data-field="start" value="${esc(times[sh].start)}"></label><label>종료<input type="time" data-code="${sh}" data-field="end" value="${esc(times[sh].end)}"></label><label>휴게(분)<input type="number" min="0" max="1440" data-code="${sh}" data-field="breakMinutes" value="${times[sh].breakMinutes}"></label></div>`).join('');
+  const times=Object.fromEntries(['D','E','N','M'].map(sh=>[sh,state.shiftTimes?.[sh]||defaultShiftTimes[sh]]));
+  shiftTimeSettings.innerHTML=['D','E','N','M'].map(sh=>`<div class="time-setting"><b>${sh}</b><label>시작<input type="time" data-code="${sh}" data-field="start" value="${esc(times[sh].start)}"></label><label>종료<input type="time" data-code="${sh}" data-field="end" value="${esc(times[sh].end)}"></label><label>휴게(분)<input type="number" min="0" max="1440" data-code="${sh}" data-field="breakMinutes" value="${esc(times[sh].breakMinutes)}"></label></div>`).join('');
   confirmShiftTimes.checked=!!state.shiftTimesConfirmed;
 }
 

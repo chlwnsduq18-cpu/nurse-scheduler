@@ -3,7 +3,7 @@ const {JSDOM}=require('jsdom');
 const root=path.join(__dirname,'..');
 function page(){
  const html=fs.readFileSync(path.join(root,'index.html'),'utf8'),dom=new JSDOM(html,{url:'https://scheduler.test/',runScripts:'outside-only'}),window=dom.window,context=dom.getInternalVMContext(),alerts=[];
- window.alert=message=>alerts.push(message);window.confirm=()=>true;
+ window.alert=message=>alerts.push(message);window.confirm=()=>true;window.Date=class extends window.Date{constructor(...args){super(...(args.length?args:[2026,8,1]))}};
  for(const file of ['nurse-scheduler-model.js','nurse-scheduler-rules.js','nurse-scheduler-engine.js','nurse-scheduler.js'])vm.runInContext(fs.readFileSync(path.join(root,file),'utf8'),context,{filename:file});
  return {window,context,alerts,dom,doc:window.document,value:code=>vm.runInContext(code,context)};
 }
@@ -49,4 +49,11 @@ test('background Worker executes the same engine and returns without any persist
  vm.runInContext(fs.readFileSync(path.join(root,'nurse-scheduler-worker.js'),'utf8'),context);
  const state={staff:[{id:1,name:'NK',category:'NK'}],monthStaff:{},wanted:{},manual:{},assignments:{},leave:{},rules:[{type:'nkMonthly',value:0}],holidayYears:{},monthOffLimits:{}};
  context.self.onmessage({data:{state,year:2026,month:8}});assert.equal(messages.length,1);assert.equal(messages[0].error,undefined);assert.equal(messages[0].result.month,'2026-09');assert.equal(Object.values(messages[0].result.plan).filter(sh=>sh==='N').length,0);
+});
+
+test('rule screen identifies combined HN/RN D demand and two OFF after three nights',()=>{
+ const p=page();p.doc.getElementById('ruleSettings').click();
+ assert.match(p.doc.getElementById('coverageSettings').textContent,/D HN\+RN/);
+ assert.match(p.doc.body.textContent,/N 3일 뒤 OFF 2일도 허용/);
+ p.dom.window.close();
 });

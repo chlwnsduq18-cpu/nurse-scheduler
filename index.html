@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>소형 병원 간호사 스케줄러</title>
-<link rel="stylesheet" href="./nurse-scheduler.css?v=20261002-rules5">
+<link rel="stylesheet" href="./nurse-scheduler.css?v=20261015-rules6.1">
 </head>
 <body>
 <div class="app">
 <header class="top">
-  <div class="brand"><h1>간호사 스케줄러</h1><span>소형 병원용 · Browser Local Scheduler · rules5</span></div>
+  <div class="brand"><h1>간호사 스케줄러</h1><span>소형 병원용 · Browser Local Scheduler · rules6.1</span></div>
   <div class="month"><button id="prev">‹</button><h2 id="monthTitle"></h2><button id="next">›</button></div>
 </header>
 <div class="layout">
@@ -78,7 +78,7 @@
     </div>
     <div class="modal-body">
       <details class="basic-settings" open><summary>기초 편성 기준 및 근무시간</summary>
-        <p class="hint">주 최대 5일 · 근무 사이 11시간 휴식 · 원티드/휴가는 변경하지 않습니다. 기본 RN 월 N 4~5회, NK 1인 월 N 15회입니다. N 2~3일 묶음과 종료 후 OFF 2일 이상을 적용합니다. 횟수·묶음·휴식은 아래 추가 규칙에서 조정합니다. AN의 주말·공휴일 N 뒤 OFF 2일 이상. HN/MD의 기본 공휴일 OFF는 개인 휴가로 계산하지 않습니다.</p>
+        <p class="hint">주 최대 5일 · 근무 사이 11시간 휴식 · 원티드/휴가는 변경하지 않습니다. 기본 RN 월 N 4~5회, NK 1인 월 N 15회입니다. N 2~3일 묶음과 종료 후 OFF 2일 이상을 적용합니다. N 3일 뒤 OFF 2일도 허용하며, NK의 같은 일수 OFF는 선호 조건입니다. 횟수·묶음·휴식은 아래 추가 규칙에서 조정합니다. AN의 주말·공휴일 N 뒤 OFF 2일 이상. HN/MD의 기본 공휴일 OFF는 개인 휴가로 계산하지 않습니다.</p>
         <div id="shiftTimeSettings"></div>
         <label class="hint"><input type="checkbox" id="confirmShiftTimes"> 실제 병원 근무·휴게시간으로 확인했습니다.</label>
         <p class="hint">D 07–15 / E 15–23 / N 23–07, 각 휴게 30분은 예시입니다. M 09–18은 휴게 60분으로 시작합니다. 근로시간은 근무 시작일 기준으로 합산합니다. O 표시는 유급 주휴 지정이 아니며, 휴게의 실제 보장·야간근로 동의·휴일 및 특례 적용까지 판정하지 않습니다.</p>
@@ -90,7 +90,7 @@
         <div id="weekendSettings" class="weekend-settings"></div>
         <p class="hint">HN은 D만, 주말·공휴일 OFF(고정). MD는 M만, 주말·공휴일 OFF(고정). RN은 주말 M 불가, AN은 주말 M 담당입니다. 토·일·평일 공휴일의 간호사 D/E/N 기본 인원은 각각 1명입니다.</p>
         <div id="coverageSettings"></div>
-        <p class="hint">D/E는 RN 고정 인원(기본 일반 평일 각 2명, 주말·공휴일 각 1명)입니다. HN의 D는 별도이며 RN 필요 인원을 대신하지 않습니다. N은 RN+NK 합계 최소 인원(평일 2명, 주말·공휴일 1명)입니다. 기존 NK 겹침 허용을 유지하므로 개인별 월 횟수를 채울 때 N 필요 인원을 넘길 수 있습니다. 엄격한 N 정원이 필요하면 추가 최대 인원 규칙을 설정하세요. AN은 별도 인원이며 기존 D/E/N 및 주말 M 규칙을 유지합니다. M은 일반 평일 MD 우선·공석 시 RN 대체, 토·일 AN 담당이고 평일 공휴일에는 기본 필수 인원이 없습니다. 고정 인원과 월 OFF 목표가 충돌하면 초과 배정으로 숨기지 않고 미충족을 표시합니다.</p>
+        <p class="hint">D는 일반 평일 HN+RN 합계 2명, 주말·공휴일 RN 1명입니다. HN이 평일 D에 있으면 RN 1명을 더 배정합니다. E는 평일 RN 2명, 주말·공휴일 RN 1명입니다. N은 RN+NK 합계 최소 인원(평일 2명, 주말·공휴일 1명)입니다. 기존 NK 겹침 허용을 유지하므로 개인별 월 횟수를 채울 때 N 필요 인원을 넘길 수 있습니다. 엄격한 N 정원이 필요하면 추가 최대 인원 규칙을 설정하세요. AN은 별도 인원이며 기존 D/E/N 및 주말 M 규칙을 유지합니다. M은 일반 평일 MD 우선·공석 시 RN 대체, 토·일 AN 담당이고 평일 공휴일에는 기본 필수 인원이 없습니다. 고정 인원과 월 OFF 목표가 충돌하면 초과 배정으로 숨기지 않고 미충족을 표시합니다.</p>
       </details>
       <details class="basic-settings"><summary id="holidayYearLabel">공휴일 관리</summary>
         <p class="hint">2026년 공휴일 기본 목록을 제공합니다(2026-09-14 확인). 임시공휴일 변경은 직접 추가하세요. 다른 연도는 목록 입력·확인 후 생성할 수 있습니다. 일요일은 따로 입력하지 않아도 됩니다.</p>
@@ -180,9 +180,9 @@
   <div id="monthStaffChoices"></div>
   <div class="month-staff-actions"><button id="cancelMonthStaff" type="button" class="ghost">취소</button><button id="saveMonthStaff" type="button" class="primary">저장</button></div>
 </dialog>
-<script src="./nurse-scheduler-model.js?v=20261002-rules5"></script>
-<script src="./nurse-scheduler-rules.js?v=20261002-rules5"></script>
-<script src="./nurse-scheduler-engine.js?v=20261002-rules5"></script>
-<script src="./nurse-scheduler.js?v=20261002-rules5"></script>
+<script src="./nurse-scheduler-model.js?v=20261015-rules6.1"></script>
+<script src="./nurse-scheduler-rules.js?v=20261015-rules6.1"></script>
+<script src="./nurse-scheduler-engine.js?v=20261015-rules6.1"></script>
+<script src="./nurse-scheduler.js?v=20261015-rules6.1"></script>
 </body>
 </html>

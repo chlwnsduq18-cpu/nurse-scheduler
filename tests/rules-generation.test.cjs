@@ -34,13 +34,24 @@ test('calendar OFF counts dates once; holiday edits and manual override are mont
  c.state.monthOffModes['2026-09']='manual';assert.equal(c.monthlyOffLimit(),9);c.state.monthOffLimits['2026-09']=7;assert.equal(c.monthlyOffLimit(),7);
  c.cursor=new Date(2026,9,1);assert.equal(c.monthlyOffLimit(),9);
 });
-test('RN D/E fixed staffing excludes HN and weekday holiday uses one nurse',()=>{
+test('weekday D combines HN and RN while E and holiday staffing remain RN',()=>{
  const c=setup({roles:['HN','RN','RN','NK','AN']}),cfg=c.schedulerConfig();
  for(const date of ['2026-09-05','2026-09-06','2026-09-24']){
    const ds=c.dayDemands(n(date),cfg);for(const key of ['D','E']){const d=ds.find(d=>d.key===key);assert.deepEqual([...d.roles],['RN']);assert.equal(d.min,1);assert.equal(d.max,1)}
    assert.equal(ds.find(d=>d.key==='NR').min,1);assert.equal(c.dayAllowed(c.state.staff[0],n(date)),false);
  }
- assert.equal(c.dayDemands(n('2026-09-07'),cfg).find(d=>d.key==='D').min,2);
+ const weekday=c.dayDemands(n('2026-09-07'),cfg),d=weekday.find(d=>d.key==='D');
+ assert.equal(d.min,2);assert.equal(d.max,2);assert.deepEqual([...d.roles],['HN','RN']);
+ assert.deepEqual([...weekday.find(d=>d.key==='E').roles],['RN']);
+ const plan={'2026-09-07:1':'D'};
+ assert.equal(c.canPlace(plan,n('2026-09-07'),c.state.staff[1],'D',cfg),true);
+ plan['2026-09-07:2']='D';assert.equal(c.canPlace(plan,n('2026-09-07'),c.state.staff[2],'D',cfg),false);
+ assert.ok(!c.analyzeMonth(plan)['2026-09-07'].some(s=>s.startsWith('D(HN+RN)')));
+ plan['2026-09-07:3']='D';assert.ok(c.analyzeMonth(plan)['2026-09-07'].some(s=>s.startsWith('D(HN+RN) 1명 초과')));
+ delete plan['2026-09-07:3'];c.state.rules=[{type:'minimum',shift:'D',group:'nurse',day:'weekday',value:3}];
+ assert.equal(c.canPlace(plan,n('2026-09-07'),c.state.staff[2],'D',c.schedulerConfig()),true);
+ c.state.rules=[{type:'maximum',shift:'D',group:'nurse',day:'weekday',value:1}];
+ assert.equal(c.canPlace({'2026-09-07:1':'D'},n('2026-09-07'),c.state.staff[1],'D',c.schedulerConfig()),false);
  assert.equal(c.dayDemands(n('2026-09-07'),cfg).find(d=>d.key==='NR').roles.length,2);
 });
 test('scope-aware zero minimum/maximum applies to placement, demand, and analysis; first identical rule wins',()=>{
@@ -96,3 +107,32 @@ test('personal upper limits never overwrite conflicting wanted shifts; analysis 
 });
 
 test('M minimum for a disallowed group/day reports shortage instead of silently dropping the rule',()=>{const c=setup({roles:['AN'],rules:[{type:'minimum',shift:'M',group:'AN',day:'weekday',value:1}]});const d=c.dayDemands(n('2026-09-07')).find(d=>d.key==='XM');assert.equal(d.min,1);assert.deepEqual([...d.roles],['AN']);assert.ok(c.analyzeMonth({})['2026-09-07'].some(s=>s.includes('M(AN·기본 담당일과 충돌)')));});
+
+test('HN D fills weekday nurse demand in actual generation and regenerating preserves input',()=>{
+ const coverage=quietCoverage();coverage.weekday.D=2;coverage.saturday.D=1;coverage.holiday.D=1;
+ const c=setup({roles:['HN','RN','RN'],coverage,rules:[{type:'rnNightMin',value:0},{type:'rnNightMax',value:0}]});
+ c.setManual('2026-09-07:1','D');c.setWanted('2026-09-08:1','O');
+ const r=c.solveMonth();assert.equal(r.plan['2026-09-07:1'],'D');assert.equal(r.plan['2026-09-08:1'],'O');
+ assert.equal(c.countShift(r.plan,n('2026-09-07'),'D',['HN','RN']),2);
+ assert.equal(c.countShift(r.plan,n('2026-09-07'),'D',['RN']),1);
+ for(const date of c.getMonthDates()){
+  const day=n(c.keyFor(date,0).split(':')[0]),d=c.dayDemands(day).find(d=>d.key==='D');
+  assert.ok(c.countShift(r.plan,day,'D',d.roles)<=d.max);
+ }
+});
+test('three NK nights may be followed by only two OFF before the next block',()=>{
+ const c=setup({roles:['NK']}),cfg=c.schedulerConfig(),st=c.state.staff[0];
+ const plan={'2026-09-01:1':'N','2026-09-02:1':'N','2026-09-03:1':'N','2026-09-04:1':'O','2026-09-05:1':'O','2026-09-06:1':'N','2026-09-07:1':'N'};
+ assert.equal(cfg.nkRestMatch,1);assert.equal(cfg.nightRest,2);
+ for(const day of ['2026-09-03','2026-09-06','2026-09-07'])assert.deepEqual([...c.staffProblems(plan,n(day),st,'N',cfg)],[]);
+ c.state.rules=[{type:'nightRest',value:3}];assert.ok(c.staffProblems(plan,n('2026-09-06'),st,'N',c.schedulerConfig()).some(s=>s.includes('최소 3일 OFF')));
+});
+test('M roles and manual regeneration protection remain unchanged',()=>{
+ const c=setup({roles:['MD','RN','AN']}),cfg=c.schedulerConfig();
+ assert.deepEqual([...c.midDemand(n('2026-09-07'),cfg).roles],['MD','RN']);
+ assert.deepEqual([...c.midDemand(n('2026-09-05'),cfg).roles],['AN']);
+ assert.equal(c.midDemand(n('2026-09-24'),cfg).min,0);
+ assert.equal(c.canPlace({'2026-09-07:1':'M'},n('2026-09-07'),c.state.staff[1],'M',cfg),false);
+ c.setManual('2026-09-07:2','M');c.setWanted('2026-09-05:3','M');const r=c.solveMonth();
+ assert.equal(r.plan['2026-09-07:2'],'M');assert.equal(r.plan['2026-09-05:3'],'M');
+});

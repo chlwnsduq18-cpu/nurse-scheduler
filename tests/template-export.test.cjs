@@ -121,3 +121,13 @@ test('background colors follow wanted provenance, holiday and explicit OFF prior
  assert.equal(nodes(doc,'conditionalFormatting').length,0);
  assert.equal(value(doc,'F9'),'OFF');assert.equal(value(doc,'G9'),'휴가');
 });
+test('cleared base OFF label receives the selected monthly value',async()=>{
+ for(const text of ['기준 OFF','']){
+  const zip=await JSZip.loadAsync(template),doc=parse(await zip.file('xl/worksheets/sheet1.xml').async('string')),target=cell(doc,'H5');
+  while(target.firstChild)target.removeChild(target.firstChild);target.setAttribute('t','inlineStr');
+  const inline=doc.createElementNS(NS,'is'),t=doc.createElementNS(NS,'t');t.textContent=text;inline.appendChild(t);target.appendChild(inline);
+  zip.file('xl/worksheets/sheet1.xml',new XMLSerializer().serializeToString(doc));
+  const result=await load({year:2026,month:9,baseOff:9,staff:[staff('RN','월휴무검사')]},await zip.generateAsync({type:'uint8array'}));
+  assert.equal(value(result.doc,'H5'),'기준 OFF 9');
+ }
+});

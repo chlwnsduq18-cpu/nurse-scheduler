@@ -233,8 +233,8 @@
     ['D','E','N','M'].forEach((shift,i)=>write(cellAt(totals+i,3),shift));
     write(cellAt(2,2),value(2,2).replace(/\d{4}년/g,year+'년').replace(/\d+월/g,month+'월'));
     write(cellAt(5,2),`${year}년 ${month}월`);
-    // No monthly base-OFF field exists in the application yet: preserve the label, not a stale number.
-    write(cellAt(5,8),value(5,8).replace(/\d+(?:\.\d+)?/g,options.baseOff==null?'':String(options.baseOff)));
+    const offLabel=value(5,8),offValue=options.baseOff;
+    write(cellAt(5,8),offValue==null?offLabel.replace(/\d+(?:\.\d+)?/g,''):/\d/.test(offLabel)?offLabel.replace(/\d+(?:\.\d+)?/g,String(offValue)):(offLabel||'기준 OFF')+' '+offValue);
     const merges=first(sheetRoot,'mergeCells');
     if(merges) {
       for(const merge of children(merges)) {
